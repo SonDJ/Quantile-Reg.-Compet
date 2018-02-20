@@ -1,4 +1,5 @@
-library(cmprskQR) ; library(survival) ; library(rlist)
+library(cmprskQR) ; library(survival) ; library(rlist) ; library(quantreg)
+
 set.seed(100)
 z1.300=runif(n = 300, min = -1, max = 1) ; z1.500=runif(n = 500, min = -1, max = 1)
 z2.300=rbinom(n = 300, size = 1, prob = 0.5) ; z2.500=rbinom(n = 500, size = 1, prob = 0.5)
@@ -31,17 +32,17 @@ gamma=function(tau, n, obs, status, covariate, beta){
   km.cens=survfit(Surv(time = obs, event = ifelse(status==0,1,0))~1)
   sum.mat.1=list()
   for(i in 1:n){
-    sum.mat.1[[i]]=covariate[i,]%*%t(covariate[i,])*as.numeric((ifelse(status[i]==1, 1, 0)*ifelse(log(obs[i])-(covariate%*%beta)[i]<0, 1, 0)/km.cens$surv[i]-tau)^2)
+    sum.mat.1[[i]]=outer(covariate[i,], covariate[i,])*as.numeric((ifelse(log(obs[i])-(covariate%*%beta)[i]<=0 & status[i]==1, 1, 0)/km.cens$surv[i]-tau))^2
   }
   
   l=list() ; ll=list() ; divide=c()
   for(i in 1:n){
-    sub.list=list()
     divide[i]=sum(ifelse(obs[i]<=obs, 1, 0))
+    sub.list=list()
     for(j in 1:n){
-      sub.list[[j+n*(i-1)]]=covariate[j,]*as.numeric(ifelse(obs[i]<=obs[j], 1, 0)*ifelse(obs[j]<=exp((covariate%*%beta)[j]), 1, 0)*ifelse(status[j]==1, 1, 0)/(km.cens$surv[j]*divide[i]))
+      sub.list[[j]]=covariate[j,]*as.numeric(ifelse(obs[j]>=obs[i], 1, 0)*ifelse(obs[j]<=exp((covariate%*%beta)[j]) & status[j]==1, 1, 0)/(km.cens$surv[j]*divide[i]))
     }
-    ll[[i]]=Reduce('+', sub.list[((i-1)*n+1):(n*i)])
+    ll[[i]]=Reduce('+', sub.list)
     l[[i]]=ifelse(status[i]==0, 1, 0)*outer(ll[[i]], ll[[i]])
   }
   return(1/n*Reduce('+', sum.mat.1)-1/n*Reduce('+', l))
@@ -92,10 +93,10 @@ eps.300=ifelse(n.obs.300==cens.300, 0, eps.300)
 
 pfcmp.300=crrQR(ftime = n.obs.300, fstatus = eps.300, X = model.matrix(~z1.300+z2.300)[,-1], tau.step = 0.2, tau.range = c(0.2, 0.4), failcode = 1, cencode = 0)
 
-a=NewtonRaphson(taus = 0.2, ns = 300, obss = n.obs.300, statuss = eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = c(-1.4, 1, 0.75))
+a=NewtonRaphson(taus = 0.2, ns = 300, obss = n.obs.300, statuss = eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = pfcmp.300$beta.seq[1,])
 
 j=1
-sols=as.matrix(c(-1.4, 0.99, 0.755))
+sols=as.matrix(pfcmp.300$beta.seq[1,])
 cov=list(diag(rep(1/300, 3), 3))
 repeat{
   new.beta=sols[,j]-solve(A(n = 300, obs = n.obs.300, status = eps.300, covariate = cbind(rep(1,300),z1.300,z2.300), beta = sols[,j], sigma = cov[[j]]))%*%as.matrix(smooth.est.eq(tau = 0.2, n = 300, obs = n.obs.300, status = eps.300, covariate = cbind(rep(1,300),z1.300,z2.300),beta = sols[,j], sigma = cov[[j]]))
@@ -105,3 +106,5 @@ repeat{
   j=j+1
   if(all(sapply(abs(sols[,j]-sols[,j-1]), FUN=function(i) {I(i<1/(10^5))}))) break
 }
+
+tau=0.2 ; n=300 ; obs=n.obs.300 ; status=eps.300 ; covariate=cbind(rep(1, 300), z1.300, z2.300) ; beta=c(-1.4, 1, 0.756)

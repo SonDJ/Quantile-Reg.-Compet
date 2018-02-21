@@ -1,4 +1,4 @@
-library(cmprskQR) ; library(survival) ; library(rlist) ; library(quantreg)
+library(cmprskQR) ; library(survival)
 
 set.seed(100)
 z1.300=runif(n = 300, min = -1, max = 1) ; z1.500=runif(n = 500, min = -1, max = 1)
@@ -23,7 +23,7 @@ sampling_func=function(dist, status, z1, z2){
   if(dist=='normal') time_vec=ifelse(status==1, exp(-rep(1,length(status))+z1+z2+qnorm(unif, 0, 1)), exp(-rep(1,length(status))+z1-z2+qnorm(unif, 0, 1)))
   else if(dist=='logistic') time_vec=ifelse(status==1, exp(-rep(1,length(status))+z1+z2+qlogis(unif, 0, 1)), exp(-rep(1,length(status))+z1-z2+qlogis(unif, 0, 1)))
   else if(dist=='cauchy') time_vec=ifelse(status==1, exp(-rep(1,length(status))+z1+z2+qcauchy(unif, 0, 1)), exp(-rep(1,length(status))+z1-z2+qcauchy(unif, 0, 1)))
-  else if(dist=='weibull') time_vec=ifelse(status==1, exp(-rep(1,length(status))+z1+z2+qweibullm(unif, 0.5, 1)), exp(-rep(1,length(status))+z1-z2+qweibull(unif, 0.5, 1)))
+  else if(dist=='weibull') time_vec=ifelse(status==1, exp(-rep(1,length(status))+z1+z2+qweibull(unif, 0.5, 1)), exp(-rep(1,length(status))+z1-z2+qweibull(unif, 0.5, 1)))
   }
   return(time_vec)
 }
@@ -93,10 +93,63 @@ eps.300=ifelse(n.obs.300==cens.300, 0, eps.300)
 
 pfcmp.300=crrQR(ftime = n.obs.300, fstatus = eps.300, X = model.matrix(~z1.300+z2.300)[,-1], tau.step = 0.2, tau.range = c(0.2, 0.4), failcode = 1, cencode = 0)
 
-a=NewtonRaphson(taus = 0.2, ns = 300, obss = n.obs.300, statuss = eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = pfcmp.300$beta.seq[1,])
+n.300=NewtonRaphson(taus = 0.2, ns = 300, obss = n.obs.300, statuss = eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = c(-1.4, 1, 0.75))
+
+#n=300 cases-Logistic
+
+set.seed(300)
+l.eps.300=eps.300
+
+l.time.300=sampling_func(dist = 'logistic', status = l.eps.300, z1 = z1.300, z2 = z2.300)
+
+set.seed(400)
+l.cens.300=runif(300, 0, 4.6) ; l.cens.500=runif(500, 0, 4.6)
+
+l.obs.300=ifelse(l.time.300>cens.300, l.cens.300, l.time.300)
+
+l.eps.300=ifelse(l.obs.300==l.cens.300, 0, l.eps.300)
+
+l.pfcmp.300=crrQR(ftime = l.obs.300, fstatus = l.eps.300, X = model.matrix(~z1.300+z2.300)[,-1], tau.step = 0.2, tau.range = c(0.2, 0.4), failcode = 1, cencode = 0)
+
+l.300=NewtonRaphson(taus = 0.2, ns = 300, obss = l.obs.300, statuss = l.eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = c(-1.69, 1, 0.59))
+
+#n=300 cases-Cauchy
+c.eps.300=eps.300
+
+set.seed(300)
+c.time.300=sampling_func(dist = 'cauchy', status = eps.300, z1 = z1.300, z2 = z2.300)
+
+set.seed(400)
+c.cens.300=runif(300, 0, 4.6)
+
+c.obs.300=ifelse(c.time.300>c.cens.300, c.cens.300, c.time.300)
+
+c.eps.300=ifelse(c.obs.300==c.cens.300, 0, c.eps.300)
+
+c.pfcmp.300=crrQR(ftime = c.obs.300, fstatus = c.eps.300, X = model.matrix(~z1.300+z2.300)[,-1], tau.step = 0.2, tau.range = c(0.2, 0.4), failcode = 1, cencode = 0)
+
+c.300=NewtonRaphson(taus = 0.2, ns = 300, obss = c.obs.300, statuss = c.eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = c(-1.57, 1, 0.57))
+
+#n=300 cases-Weibull
+w.eps.300=eps.300
+
+set.seed(300)
+w.time.300=sampling_func(dist = 'weibull', status = w.eps.300, z1 = z1.300, z2 = z2.300)
+
+set.seed(400)
+w.cens.300=runif(300, 0, 4.6) ; w.cens.500=runif(500, 0, 4.6)
+
+w.obs.300=ifelse(w.time.300>w.cens.300, w.cens.300, w.time.300)
+
+w.eps.300=ifelse(w.obs.300==w.cens.300, 0, w.eps.300)
+
+w.pfcmp.300=crrQR(ftime = w.obs.300, fstatus = w.eps.300, X = model.matrix(~z1.300+z2.300)[,-1], tau.step = 0.2, tau.range = c(0.2, 0.4), failcode = 1, cencode = 0)
+
+w.300=NewtonRaphson(taus = 0.2, ns = 300, obss = w.obs.300, statuss = w.eps.300, covariates = cbind(rep(1,300), z1.300, z2.300), betas = c(-0.83, 1, 0.91))
+
 
 j=1
-sols=as.matrix(pfcmp.300$beta.seq[1,])
+sols=as.matrix(c(-1.4, 1, 0.75))
 cov=list(diag(rep(1/300, 3), 3))
 repeat{
   new.beta=sols[,j]-solve(A(n = 300, obs = n.obs.300, status = eps.300, covariate = cbind(rep(1,300),z1.300,z2.300), beta = sols[,j], sigma = cov[[j]]))%*%as.matrix(smooth.est.eq(tau = 0.2, n = 300, obs = n.obs.300, status = eps.300, covariate = cbind(rep(1,300),z1.300,z2.300),beta = sols[,j], sigma = cov[[j]]))
@@ -106,5 +159,3 @@ repeat{
   j=j+1
   if(all(sapply(abs(sols[,j]-sols[,j-1]), FUN=function(i) {I(i<1/(10^5))}))) break
 }
-
-tau=0.2 ; n=300 ; obs=n.obs.300 ; status=eps.300 ; covariate=cbind(rep(1, 300), z1.300, z2.300) ; beta=c(-1.4, 1, 0.756)

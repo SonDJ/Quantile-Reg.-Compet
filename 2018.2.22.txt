@@ -1,0 +1,11 @@
+2018 2/22
+
+1. 시뮬레이션을 하는 이유? 우리가 현실적으로 얻을 수 있는 표본 하에서도 asymptotic normality를 따르는지 아닌지 파악하기 위해(n goes to infinity)
+
+2. variane matrix 부분을 iteration 하지 말고 identity로 먼저... equation solve package로 확인
+
+3. equation solver와 내가 짠 N-R iteration이 비슷한 값을 낸다면 sampling을 여러 번 반복해서 평균을 내기
+
+
+
+*uniform consistency 부분에서 sqrt(n)이 아닌 1/sqrt(n) ???

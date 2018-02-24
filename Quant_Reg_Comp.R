@@ -82,7 +82,7 @@ simulation_function=function(m, N, Dist, L, Tau){
   for(i in 1:m){
     Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
     Eps=cause_sampling_func(Z2)
-    time=sampling_func(dist = Dist, status = eps, z1 = Z1, z2 = Z2)
+    time=sampling_func(dist = Dist, status = Eps, z1 = Z1, z2 = Z2)
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)

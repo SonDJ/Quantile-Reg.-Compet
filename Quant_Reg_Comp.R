@@ -1,4 +1,4 @@
-library(cmprskQR) ; library(survival) ; library(testit) ; library(nleqslv)
+library(cmprskQR) ; library(survival) ; library(nleqslv) ; library(rootSolve)
 
 cause_sampling_func=function(z){
   sample_vec=c()
@@ -100,10 +100,9 @@ simulation_function=function(m, N, Dist, L, Tau){
   return(list(1/length(reg.est)*Reduce('+', reg.est), 1/length(reg.est)*Reduce('+', cov.est)))
 }
 
-normal.model.300=simulation_function(m = 5, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+normal.model.300=simulation_function(m = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
 
 #no consideration of covariance matrix
-
 Naive_simulation_function=function(m, N, Dist, L, Tau){
   cov.est=diag(rep(1/N, 3), 3) ; i=1 ; m.sol=list()
   repeat{
@@ -115,23 +114,78 @@ Naive_simulation_function=function(m, N, Dist, L, Tau){
     Eps=ifelse(Obs==cens, 0, Eps)
     pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
     
-    beta.smooth.est.eq=function(beta){
-      covariate=cbind(rep(1, N), Z1, Z2); sigma=cov.est
-      km.cens=survfit(Surv(time = Obs, event = ifelse(Eps==0,1,0))~1)$surv
-      if(km.cens[N]==0) km.cens[N]=km.cens[N-1] else km.cens[N]=km.cens[N]
-      sum.list=list()
-      for(i in 1:N){
-        sum.list[[i]]=covariate[i,]*as.numeric(ifelse(Eps[i]==1, 1, 0)/km.cens[i]*pnorm(-(log(Obs[i])-(covariate%*%beta)[i])/sqrt(as.numeric(t(covariate[i,])%*%sigma%*%covariate[i,])), 0, 1)-Tau)
-      }
-      return(1/N*Reduce('+', sum.list))
-    }
-    
-    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = beta.smooth.est.eq, method = c("Newton"))$x
+    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
     i=i+1
     if(length(m.sol)==m) break
   }
-  return(list(1/length(m.sol)*Reduce('+', m.sol), cov.est))
+  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
+  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
+  sample.cov.mat=1/m*Reduce('+', covariance_matrix_sum)
+  return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat))
 }
 
+set.seed(100)
 naive.normal.model.300=Naive_simulation_function(m = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
-naive.logistic.model.300=Naive_simulation_function(m = 100, N = 300, Dist = 'logistic', L = 15, Tau = 0.2)
+
+#MB(Multiplier Bootstrap) Method for covariance matrix estimation
+MB.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
+  km.cens=survfit(Surv(time = obs, event = ifelse(status==0,1,0))~1)$surv
+  if(km.cens[n]==0) km.cens[n]=km.cens[n-1]
+  sum.list=list()
+  for(i in 1:n){
+    sum.list[[i]]=eta[i]*covariate[i,]*as.numeric(ifelse(status[i]==1, 1, 0)/km.cens[i]*pnorm(-(log(obs[i])-(covariate%*%beta)[i])/sqrt(as.numeric(t(covariate[i,])%*%sigma%*%covariate[i,])), 0, 1)-tau)
+  }
+  return(1/n*Reduce('+', sum.list))
+}
+
+MB_simulation_function=function(B, N, Dist, L, Tau){
+  cov.est=diag(rep(1/N, 3), 3) ; i=1 ; m.sol=list()
+  repeat{
+    Eta=rexp(n = N, rate = 1)
+    Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+    Eps=cause_sampling_func(Z2)
+    time=sampling_func(dist = Dist, status = Eps, z1 = Z1, z2 = Z2)
+    cens=runif(n = N, min = 0, max = L)
+    Obs=ifelse(time>cens, cens, time)
+    Eps=ifelse(Obs==cens, 0, Eps)
+    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    
+    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
+    i=i+1
+    if(length(m.sol)==B) break
+  }
+  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
+  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
+  return(1/B*Reduce('+', covariance_matrix_sum))
+}
+
+set.seed(100)
+MB.normal.model.300=MB_simulation_function(B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+
+#IS-MB method
+ISMB_simulation_function=function(B, N, Dist, L, Tau){
+  cov.est=diag(rep(1/N, 3), 3) ; i=1 ; m.sol=list() ; evaluation=list() ; jacobian=list()
+  repeat{
+    Eta=rexp(n = N, rate = 1)
+    Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+    Eps=cause_sampling_func(Z2)
+    time=sampling_func(dist = Dist, status = Eps, z1 = Z1, z2 = Z2)
+    cens=runif(n = N, min = 0, max = L)
+    Obs=ifelse(time>cens, cens, time)
+    Eps=ifelse(Obs==cens, 0, Eps)
+    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    
+    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
+    evaluation[[i]]=MB.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = m.sol[[i]], sigma = cov.est, eta = Eta)
+    jacobian[[i]]=gradient(f = smooth.est.eq, x = m.sol[[i]], tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
+    i=i+1
+    if(length(m.sol)==B) break
+  }
+  eval_bar=as.vector(1/length(evaluation)*Reduce('+', evaluation))
+  eval_matrix_sum=lapply(X = evaluation, FUN = function(j){outer(j-eval_bar, j-eval_bar)})
+  V_mat=1/B*Reduce('+', eval_matrix_sum)
+  A_mat=as.matrix(1/length(jacobian)*Reduce('+', jacobian))
+  return(N*solve(A_mat)%*%V_mat%*%solve(A_mat))
+}
+
+ISMB.normal.model.300=ISMB_simulation_function(B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)

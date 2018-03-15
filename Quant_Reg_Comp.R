@@ -91,7 +91,7 @@ simulation_function=function(m, N, Dist, L, Tau){
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
-    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
     a=NewtonRaphson(taus = Tau, ns = N, obss = Obs, statuss = Eps, covariates = cbind(rep(1,N), Z1, Z2), betas = as.vector(pfcmp$beta.seq))
     reg.est[[i]]=a[[1]] ; cov.est[[i]]=a[[2]]
     i=i+1
@@ -112,7 +112,7 @@ Naive_simulation_function=function(m, N, Dist, L, Tau){
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
-    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
     
     m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
     i=i+1
@@ -148,7 +148,7 @@ MB_simulation_function=function(B, N, Dist, L, Tau){
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
-    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
     
     m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
     i=i+1
@@ -159,8 +159,8 @@ MB_simulation_function=function(B, N, Dist, L, Tau){
   return(1/B*Reduce('+', covariance_matrix_sum))
 }
 
-set.seed(100)
-MB.normal.model.300=MB_simulation_function(B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+set.seed(300)
+MB.normal.model.300=MB_simulation_function(B = 300, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
 
 #IS-MB method
 ISMB_simulation_function=function(B, N, Dist, L, Tau){
@@ -173,19 +173,19 @@ ISMB_simulation_function=function(B, N, Dist, L, Tau){
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
-    pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+    pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
     
-    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
-    evaluation[[i]]=MB.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = m.sol[[i]], sigma = cov.est, eta = Eta)
-    jacobian[[i]]=gradient(f = smooth.est.eq, x = m.sol[[i]], tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
+    evaluation[[i]]=MB.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est, eta = Eta)
+    jacobian[[i]]=gradient(f = smooth.est.eq, x = as.vector(pfcmp$beta.seq), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
     i=i+1
-    if(length(m.sol)==B) break
+    if(length(evaluation)==B) break
   }
   eval_bar=as.vector(1/length(evaluation)*Reduce('+', evaluation))
   eval_matrix_sum=lapply(X = evaluation, FUN = function(j){outer(j-eval_bar, j-eval_bar)})
   V_mat=1/B*Reduce('+', eval_matrix_sum)
   A_mat=as.matrix(1/length(jacobian)*Reduce('+', jacobian))
-  return(N*solve(A_mat)%*%V_mat%*%solve(A_mat))
+  return(solve(A_mat)%*%V_mat%*%solve(A_mat))
 }
 
-ISMB.normal.model.300=ISMB_simulation_function(B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+set.seed(300)
+ISMB.normal.model.300=ISMB_simulation_function(B = 300, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)

@@ -24,20 +24,25 @@ sampling_func=function(dist, status, z1, z2){
 gamma=function(tau, n, obs, status, covariate, beta){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
-  sum.mat.1=list()
+  obs.per=c()
   for(i in 1:n){
-    sum.mat.1[[i]]=outer(covariate[i,], covariate[i,])*as.numeric((ifelse(log(obs[i])-(covariate%*%beta)[i]<=0 & status[i]==1, 1, 0)/km.cens[i]-tau))^2
+    obs.per[i]=which(obs==SF$time[i])
+  }
+  sum.mat.1=list()
+  
+  for(i in 1:n){
+    sum.mat.1[[i]]=outer(covariate[obs.per[i],], covariate[obs.per[i],])*as.numeric((ifelse(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]]<=0 & status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)-tau))^2
   }
   
   l=list() ; ll=list() ; divide=c()
   for(i in 1:n){
-    divide[i]=sum(ifelse(obs[i]<=obs, 1, 0))
+    divide[i]=sum(ifelse(obs[obs.per[i]]<=obs, 1, 0))
     sub.list=list()
     for(j in 1:n){
-      sub.list[[j]]=covariate[j,]*as.numeric(ifelse(obs[j]>=obs[i], 1, 0)*ifelse(obs[j]<=exp((covariate%*%beta)[j]) & status[j]==1, 1, 0)/(km.cens[j]*divide[i]))
+      sub.list[[j]]=covariate[obs.per[j],]*as.numeric(ifelse(obs[obs.per[j]]>=obs[i], 1, 0)*ifelse(obs[obs.per[j]]<=exp((covariate%*%beta)[obs.per[j]]) & status[which(obs==SF$time[j])]==1, 1, 0)/(km.cens[j]*divide[i]))
     }
     ll[[i]]=Reduce('+', sub.list)
-    l[[i]]=ifelse(status[i]==0, 1, 0)*outer(ll[[i]], ll[[i]])
+    l[[i]]=ifelse(status[obs.per[i]]==0, 1, 0)*outer(ll[[i]], ll[[i]])
   }
   return(1/n*Reduce('+', sum.mat.1)-1/n*Reduce('+', l))
 }
@@ -45,9 +50,13 @@ gamma=function(tau, n, obs, status, covariate, beta){
 A=function(n, obs, status, covariate, beta, sigma){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
+  obs.per=c()
+  for(i in 1:n){
+    obs.per[i]=which(obs==SF$time[i])
+  }
   sum.list=list()
   for(i in 1:n){
-    sum.list[[i]]=as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[i])-(covariate%*%beta)[i])/sqrt(as.numeric(t(covariate[i,])%*%sigma%*%covariate[i,])), 0, 1))/as.numeric(sqrt(t(covariate[i,])%*%sigma%*%covariate[i,]))*outer(covariate[i,], covariate[i,])
+    sum.list[[i]]=as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1))/as.numeric(sqrt(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],]))*outer(covariate[obs.per[i],], covariate[obs.per[i],])
   }
   return(1/n*Reduce('+', sum.list))
 }
@@ -55,9 +64,13 @@ A=function(n, obs, status, covariate, beta, sigma){
 smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
+  obs.per=c()
+  for(i in 1:n){
+    obs.per[i]=which(obs==SF$time[i])
+  }
   sum.list=list()
   for(i in 1:n){
-    sum.list[[i]]=as.vector(covariate[i,])*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[i])-(covariate%*%beta)[i])/sqrt(as.numeric(t(covariate[i,])%*%sigma%*%covariate[i,])), 0, 1)-tau)
+    sum.list[[i]]=as.vector(covariate[obs.per[i],])*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
   }
   return(1/n*Reduce('+', sum.list))
 }
@@ -106,9 +119,13 @@ normal.model.300=simulation_function(m = 100, N = 300, Dist = 'normal', L = 4.6,
 MB.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
+  obs.per=c()
+  for(i in 1:n){
+    obs.per[i]=which(obs==SF$time[i])
+  }
   sum.list=list()
   for(i in 1:n){
-    sum.list[[i]]=eta[i]*covariate[i,]*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[i])-(covariate%*%beta)[i])/sqrt(as.numeric(t(covariate[i,])%*%sigma%*%covariate[i,])), 0, 1)-tau)
+    sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
   }
   return(1/n*Reduce('+', sum.list))
 }
@@ -127,8 +144,8 @@ MB_simulation_function=function(m, B, N, Dist, L, Tau){
     
     boot.list=list()
     for(j in 1:B){
-      Eta=rexp(n = B, rate = 1)
-      boot.list[[j]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
+      Eta=rexp(n = N, rate = 1)
+      boot.list[[j]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
     covariance_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
@@ -157,16 +174,15 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
     pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
     m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
     
-    boot.list=list() ; jacobian=list()
+    boot.list=list()
     for(j in 1:B){
-      Eta=rexp(n = B, rate = 1)
+      Eta=rexp(n = N, rate = 1)
       boot.list[[j]]=MB.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est, eta = Eta)
-      jacobian[[j]]=gradient(f = smooth.est.eq, x = as.vector(pfcmp$beta.seq), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-    covariance_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
-    V.cov=1/B*Reduce('+', covariance_matrix_sum)
-    A_mat=as.matrix(1/length(jacobian)*Reduce('+', jacobian))
+    boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
+    V.cov=1/B*Reduce('+', boot_matrix_sum)
+    A_mat=gradient(f = smooth.est.eq, x = as.vector(pfcmp$beta.seq), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
     boot.cov[[i]]=solve(A_mat)%*%V.cov%*%solve(A_mat)
   }
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))

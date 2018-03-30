@@ -125,7 +125,7 @@ MB.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
   }
   sum.list=list()
   for(i in 1:n){
-    sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
+    sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
   }
   return(1/n*Reduce('+', sum.list))
 }
@@ -145,11 +145,11 @@ MB_simulation_function=function(m, B, N, Dist, L, Tau){
     boot.list=list()
     for(j in 1:B){
       Eta=rexp(n = N, rate = 1)
-      boot.list[[j]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
+      boot.list[[j]]=nleqslv(x = as.vector(m.sol[[i]]), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-    covariance_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
-    boot.cov[[i]]=1/B*Reduce('+', covariance_matrix_sum)
+    boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
+    boot.cov[[i]]=1/B*Reduce('+', boot_matrix_sum)
   }
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
   covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
@@ -159,7 +159,7 @@ MB_simulation_function=function(m, B, N, Dist, L, Tau){
 }
 
 set.seed(300)
-naive.normal.model.300=MB_simulation_function(m = 100, B=100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+naive.normal.model.300=MB_simulation_function(m = 50, B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
 
 #IS-MB method
 ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
@@ -193,4 +193,4 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
 }
 
 set.seed(300)
-ISMB.normal.model.300=ISMB_simulation_function(m = 100, B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+ISMB.normal.model.300=ISMB_simulation_function(m = 300, B = 1000, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)

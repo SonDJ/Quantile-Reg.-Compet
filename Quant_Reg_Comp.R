@@ -176,12 +176,12 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
     boot.list=list()
     for(j in 1:B){
       Eta=rexp(n = N, rate = 1)
-      boot.list[[j]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est, eta = Eta)
+      boot.list[[j]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = m.sol[[i]], sigma = cov.est, eta = Eta)
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
     boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
     V.cov=1/B*Reduce('+', boot_matrix_sum)
-    A_mat=A(n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est)
+    A_mat=A(n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = m.sol[[i]], sigma = cov.est)
     boot.cov[[i]]=solve(A_mat)%*%V.cov%*%solve(A_mat)
   }
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))

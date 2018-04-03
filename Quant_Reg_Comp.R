@@ -1,5 +1,4 @@
-library(cmprskQR) ; library(survival) ; library(nleqslv) ; library(rootSolve)
-
+library(cmprskQR) ; library(survival) ; library(nleqslv)
 cause_sampling_func=function(z){
   sample_vec=c()
   for(i in 1:length(z)){
@@ -116,7 +115,7 @@ simulation_function=function(m, N, Dist, L, Tau){
 normal.model.300=simulation_function(m = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
 
 #MB method
-MB.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
+boot.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
   obs.per=c()
@@ -145,7 +144,7 @@ MB_simulation_function=function(m, B, N, Dist, L, Tau){
     boot.list=list()
     for(j in 1:B){
       Eta=rexp(n = N, rate = 1)
-      boot.list[[j]]=nleqslv(x = as.vector(m.sol[[i]]), fn = MB.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
+      boot.list[[j]]=nleqslv(x = as.vector(m.sol[[i]]), fn = boot.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
     boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
@@ -177,12 +176,12 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
     boot.list=list()
     for(j in 1:B){
       Eta=rexp(n = N, rate = 1)
-      boot.list[[j]]=MB.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est, eta = Eta)
+      boot.list[[j]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est, eta = Eta)
     }
     boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
     boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
     V.cov=1/B*Reduce('+', boot_matrix_sum)
-    A_mat=gradient(f = smooth.est.eq, x = as.vector(pfcmp$beta.seq), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)
+    A_mat=A(n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = as.vector(pfcmp$beta.seq), sigma = cov.est)
     boot.cov[[i]]=solve(A_mat)%*%V.cov%*%solve(A_mat)
   }
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
@@ -193,4 +192,4 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
 }
 
 set.seed(300)
-ISMB.normal.model.300=ISMB_simulation_function(m = 300, B = 1000, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+ISMB.normal.model.300=ISMB_simulation_function(m = 100, B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)

@@ -69,7 +69,12 @@ smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma){
   }
   sum.list=list()
   for(i in 1:n){
+    if(status[which(obs==SF$time[i])]==1){
     sum.list[[i]]=as.vector(covariate[obs.per[i],])*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
+    }
+    else{
+      sum.list[[i]]=-covariate[obs.per[i],]*tau
+    }
   }
   return(1/n*Reduce('+', sum.list))
 }
@@ -124,7 +129,12 @@ boot.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
   }
   sum.list=list()
   for(i in 1:n){
+    if(status[which(obs==SF$time[i])]==1){
     sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
+    }
+    else{
+      sum.list[[i]]=-eta[i]*covariate[obs.per[i],]*tau
+    }
   }
   return(1/n*Reduce('+', sum.list))
 }

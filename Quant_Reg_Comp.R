@@ -67,7 +67,7 @@ smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma){
   sum.list=list()
   for(i in 1:n){
     if(status[which(obs==SF$time[i])]==1){
-    sum.list[[i]]=as.vector(covariate[obs.per[i],])*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
+      sum.list[[i]]=as.vector(covariate[obs.per[i],])*as.numeric(ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
     }
     else{
       sum.list[[i]]=-covariate[obs.per[i],]*tau
@@ -124,7 +124,7 @@ boot.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta){
   sum.list=list()
   for(i in 1:n){
     if(status[which(obs==SF$time[i])]==1){
-    sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
+      sum.list[[i]]=eta[obs.per[i]]*covariate[obs.per[i],]*as.numeric(ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*pnorm(-(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]])/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)-tau)
     }
     else{
       sum.list[[i]]=-eta[i]*covariate[obs.per[i],]*tau
@@ -146,19 +146,19 @@ MB_simulation_function=function(m, B, N, Dist, L, Tau){
     
     if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)<N) next
     else{
-    m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
-    
-    boot.list=list()
-    for(j in 1:B){
-      Eta=rexp(n = N, rate = 1)
-      boot.list[[j]]=nleqslv(x = as.vector(m.sol[[i]]), fn = boot.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
-    }
-    boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-    boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
-    boot.cov[[i]]=1/B*Reduce('+', boot_matrix_sum)
-    
-    i=i+1
-    if(length(m.sol)==m & length(boot.cov)==m) break
+      m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est)$x
+      
+      boot.list=list()
+      for(j in 1:B){
+        Eta=rexp(n = N, rate = 1)
+        boot.list[[j]]=nleqslv(x = as.vector(m.sol[[i]]), fn = boot.smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), sigma = cov.est, eta = Eta)$x
+      }
+      boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
+      boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
+      boot.cov[[i]]=1/B*Reduce('+', boot_matrix_sum)
+      
+      i=i+1
+      if(length(m.sol)==m & length(boot.cov)==m) break
     }
   }
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
@@ -182,7 +182,10 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
     
-    if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)<N) next
+    if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)<N) {
+      m.sol[[i]]=NULL
+      boot.cov[[i]]=NULL
+    }
     
     else if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)==N){
       pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
@@ -202,8 +205,10 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
       boot.cov[[i]]=solve(A_mat)%*%V.cov%*%solve(A_mat)
     }
     i=i+1
-    if(length(m.sol)==m & length(boot.cov)==m) break
+    if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
   }
+  m.sol=Filter(Negate(is.null), m.sol)
+  boot.cov=Filter(Negate(is.null), boot.cov)
   beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
   covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
   sample.cov.mat=1/length(m.sol)*Reduce('+', covariance_matrix_sum)
@@ -212,4 +217,4 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau){
 }
 
 set.seed(300)
-ISMB.normal.model.300=ISMB_simulation_function(m = 500, B = 100, N = 300, Dist = 'normal', L = 4.6, Tau = 0.2)
+ISMB.normal.model.300=ISMB_simulation_function(m = 300, B = 300, N = 300, Dist = 'normal', L = 4.2, Tau = 0.2)

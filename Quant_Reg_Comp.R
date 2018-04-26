@@ -22,32 +22,6 @@ sampling_func=function(dist, status, z1, z2){
   return(time_vec)
 }
 
-gamma=function(tau, n, obs, status, covariate, beta){
-  SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
-  km.cens=SF$surv
-  obs.per=c()
-  for(i in 1:n){
-    obs.per[i]=which(obs==SF$time[i])
-  }
-  sum.mat.1=list()
-  
-  for(i in 1:n){
-    sum.mat.1[[i]]=outer(covariate[obs.per[i],], covariate[obs.per[i],])*as.numeric((ifelse(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]]<=0 & status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)-tau))^2
-  }
-  
-  l=list() ; ll=list() ; divide=c()
-  for(i in 1:n){
-    divide[i]=sum(ifelse(obs[obs.per[i]]<=obs, 1, 0))
-    sub.list=list()
-    for(j in 1:n){
-      sub.list[[j]]=covariate[obs.per[j],]*as.numeric(ifelse(obs[obs.per[j]]>=obs[i], 1, 0)*ifelse(obs[obs.per[j]]<=exp((covariate%*%beta)[obs.per[j]]) & status[which(obs==SF$time[j])]==1, 1, 0)/(km.cens[j]*divide[i]))
-    }
-    ll[[i]]=Reduce('+', sub.list)
-    l[[i]]=ifelse(status[obs.per[i]]==0, 1, 0)*outer(ll[[i]], ll[[i]])
-  }
-  return(1/n*Reduce('+', sum.mat.1)-1/n*Reduce('+', l))
-}
-
 A=function(n, obs, status, covariate, beta, sigma, CCH=NULL){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
@@ -195,4 +169,13 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
 }
 
 set.seed(300)
-ISMB.normal.model.300=ISMB_simulation_function(m = 100, B = 100, N = 300, Dist = 'normal', L = 7, Tau = 0.2, Cohort = T)
+normal.model.com.100.100=ISMB_simulation_function(m = 100, B = 100, N = 300, Dist = 'normal', L = 7, Tau = 0.2)
+
+set.seed(300)
+normal.model.com.500.500=ISMB_simulation_function(m = 500, B = 500, N = 300, Dist = 'normal', L = 7, Tau = 0.2)
+
+set.seed(300)
+normal.model.cch.100.100=ISMB_simulation_function(m = 100, B = 100, N = 300, Dist = 'normal', L = 7, Tau = 0.2, Cohort = T)
+
+set.seed(300)
+normal.model.cch.500.500=ISMB_simulation_function(m = 500, B = 500, N = 300, Dist = 'normal', L = 7, Tau = 0.2, Cohort = T)

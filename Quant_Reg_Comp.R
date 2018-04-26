@@ -132,7 +132,8 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(time>cens, cens, time)
     Eps=ifelse(Obs==cens, 0, Eps)
-    COVAR=if(Cohort==T) CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)[[1]] else cbind(rep(1, N), Z1, Z2)
+    CCH.list=CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)
+    COVAR=if(Cohort==T) CCH.list[[1]] else cbind(rep(1, N), Z1, Z2)
     
     if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)<N) {
       m.sol[[i]]=NULL
@@ -140,20 +141,19 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
     }
     
     else if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)==N){
-      pfcmp=suppressMessages(crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau)))
-      m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)[[2]])$x
+      pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
+      m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = ifelse(Cohort==F, N, CCH.list[[2]]))$x
       
       boot.list=list()
-      
       for(j in 1:B){
         Eta=rexp(n = N, rate = 1)
-        boot.list[[j]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = m.sol[[i]], sigma = cov.est, eta = Eta, CCH = CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)[[2]])
+        boot.list[[j]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = m.sol[[i]], sigma = cov.est, eta = Eta, CCH = ifelse(Cohort==F, N, CCH.list[[2]]))
       }
       
       boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
       boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
       V.cov=1/B*Reduce('+', boot_matrix_sum)
-      A_mat=A(n = N, obs = Obs, status = Eps, covariate = cbind(rep(1, N), Z1, Z2), beta = m.sol[[i]], sigma = cov.est, CCH = CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)[[2]])
+      A_mat=A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = m.sol[[i]], sigma = cov.est, CCH = ifelse(Cohort==F, N, CCH.list[[2]]))
       boot.cov[[i]]=solve(A_mat)%*%V.cov%*%solve(A_mat)
     }
     i=i+1

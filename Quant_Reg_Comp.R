@@ -1,4 +1,4 @@
-library(cmprskQR) ; library(survival) ; library(nleqslv) ; library(MASS) ; library(rootSolve)
+library(cmprskQR) ; library(survival) ; library(nleqslv) ; library(MASS) ; library(quantreg)
 na.omit.list=function(y) { return(y[!sapply(y, function(x) all(is.na(x)))]) }
 
 cause_sampling_func=function(z){
@@ -92,21 +92,25 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
     Eps.fail=cause_sampling_func(Z2)
     time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
     cens=runif(n = N, min = 0, max = L)
-    Obs=ifelse(time>cens, cens, time)
+    Obs=ifelse(cens>=time, time, cens)
     Eps=ifelse(Obs==cens, 0, Eps.fail)
-    CCH_desig=CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)
+    CCH_desig=CCHD(rate = 0.2, data = cbind(rep(1, N), Z1, Z2), status = Eps)
     COVAR=if(Cohort==T) CCH_desig[[1]] else cbind(rep(1, N), Z1, Z2)
     if(Cohort==T) CCH_status=CCH_desig[[2]] else CCH_status=NULL
+    KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
+    Obs.per=match(x = KME$time, table = Obs)
+    Weight=ifelse(Eps[Obs.per]==1, 1/KME$surv, 0)
     
-    if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)<N){
+    if(length(KME$time)<N){
       m.sol[[i]]=NULL
       boot.cov[[i]]=NULL
     }
     
-    else if(length(survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)$time)==N){
-      pfcmp=crrQR(ftime = log(Obs), fstatus = Eps, X = model.matrix(~Z1+Z2)[,-1], tau.range = c(Tau, Tau))
-      m.sol[[i]]=nleqslv(x = as.vector(pfcmp$beta.seq), fn = smooth.est.eq, method = c("Newton"), tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = CCH_status)$x
+    else if(length(KME$time)==N){
+      pfcmp=as.vector(rq(formula = log(Obs[Obs.per])~COVAR[,-1], tau = 0.2, weights = Weight, na.action = na.omit)$coefficients)
       
+      m.sol[[i]]=nleqslv(x = pfcmp, fn = smooth.est.eq, tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = CCH_status)$x
+
       boot.list=list() ; Eta=list()
       
       for(j in 1:B){
@@ -118,7 +122,7 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
       boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
       V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)
       A_mat=A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = m.sol[[i]], sigma = cov.est, CCH = CCH_status)
-      if(rcond(A_mat)>=1e-15) solve.A = solve(A_mat) else if(rcond(A_mat)<1e-15) solve.A=ginv(X = A_mat)
+      if(rcond(A_mat)>=1e-15) solve.A = solve(A_mat) else solve.A=ginv(A_mat)
       boot.cov[[i]]=solve.A%*%V.cov%*%solve.A
     }
     i=i+1
@@ -134,13 +138,16 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
 }
 
 set.seed(300)
-normal.model.com.300=ISMB_simulation_function(m = 300, B = 500, N = 300, Dist = 'normal', L = 4.2, Tau = 0.2)
+normal.model.com.100.2=ISMB_simulation_function(m = 100, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
 
 set.seed(300)
-normal.model.com.2500=ISMB_simulation_function(m = 2500, B = 500, N = 300, Dist = 'normal', L = 4.2, Tau = 0.2)
+normal.model.com.2500.4=ISMB_simulation_function(m = 2500, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
 
 set.seed(300)
-normal.model.cch.100.2=ISMB_simulation_function(m = 100, B = 500, N = 1500, Dist = 'normal', L = 0.5, Tau = 0.2, Cohort = T)
+normal.model.com.4000=ISMB_simulation_function(m = 4000, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+
+set.seed(300)
+normal.model.cch.100.2=ISMB_simulation_function(m = 100, B = 500, N = 1500, Dist = 'normal', L = 0.15, Tau = 0.2, Cohort = T)
 
 set.seed(300)
 normal.model.cch.1000=ISMB_simulation_function(m = 1000, B = 500, N = 1500, Dist = 'normal', L = 1, Tau = 0.2, Cohort = T)

@@ -84,6 +84,66 @@ CCHD=function(rate, data, status){
   return(list(data, rate, sub.coh.ind))
 }
 
+# Iterative Method
+Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
+  naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
+  repeat{
+  Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+  Eps.fail=cause_sampling_func(Z2)
+  time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
+  cens=runif(n = N, min = 0, max = L)
+  Obs=ifelse(cens>=time, time, cens)
+  Eps=ifelse(Obs==cens, 0, Eps.fail)
+  CCH_desig=CCHD(rate = 0.2, data = cbind(rep(1, N), Z1, Z2), status = Eps)
+  if(Cohort==T) COVAR=CCH_desig[[1]] else COVAR=cbind(rep(1, N), Z1, Z2)
+  if(Cohort==T) CCH_status=CCH_desig[[2]] else CCH_status=NULL
+  KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
+  
+  if(length(KME$time)<N){
+    m.sol[[i]]=NULL
+    boot.cov[[i]]=NULL
+  }
+  
+  else if(length(KME$time)==N){
+    repeat.beta=list(c(-1.431, 1, 0.756)) ; repeat.cov=list(naive.cov) ; j=2
+    repeat{
+      repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))%*%smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau))
+      boot.list=list()
+      for(k in 1:B){
+        Eta=rexp(n = N, rate = 1)
+        boot.list[[k]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], eta = Eta, CCH = CCH_status)
+      }
+      boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
+      boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
+      V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)
+      repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))%*%V.cov%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))
+      if(sqrt(sum((repeat.beta[[j]]-repeat.beta[[j-1]])^2))<0.01) break
+      else j=j+1
+    }
+    m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
+    boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
+   }
+  i=i+1
+  if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
+  }
+  m.sol=Filter(Negate(is.null), m.sol)
+  boot.cov=Filter(Negate(is.null), boot.cov)
+  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
+  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
+  sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
+  boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
+  return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
+}
+
+set.seed(300)
+NormComp100.3=Iter_simulation(m = 100, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+
+set.seed(300)
+NormComp500=Iter_simulation(m = 500, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+
+set.seed(300)
+NormComp1000=Iter_simulation(m = 1000, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+
 #IS-MB method
 ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
   cov.est=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
@@ -107,9 +167,8 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
     }
     
     else if(length(KME$time)==N){
-      pfcmp=as.vector(rq(formula = log(Obs[Obs.per])~COVAR[,-1], tau = 0.2, weights = Weight, na.action = na.omit)$coefficients)
       
-      m.sol[[i]]=nleqslv(x = pfcmp, fn = smooth.est.eq, tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = CCH_status)$x
+      m.sol[[i]]=nleqslv(x = c(-1.431, 1, 0.756), fn = smooth.est.eq, tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = cov.est, CCH = CCH_status)$x
 
       boot.list=list() ; Eta=list()
       
@@ -151,3 +210,5 @@ normal.model.cch.100.2=ISMB_simulation_function(m = 100, B = 500, N = 1500, Dist
 
 set.seed(300)
 normal.model.cch.1000=ISMB_simulation_function(m = 1000, B = 500, N = 1500, Dist = 'normal', L = 1, Tau = 0.2, Cohort = T)
+
+pfcmp=as.vector(rq(formula = log(Obs[Obs.per])~COVAR[,-1], tau = 0.2, weights = Weight, na.action = na.omit)$coefficients)

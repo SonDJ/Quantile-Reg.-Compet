@@ -1,5 +1,6 @@
-library(survival) ; library(nleqslv) ; library(quantreg)
+library(survival) ; library(rootSolve)
 na.omit.list=function(y) { return(y[!sapply(y, function(x) all(is.na(x)))]) }
+inverse.check=function(m) class(try(solve(m),silent=T))=="matrix"
 
 cause_sampling_func=function(z){
   sample_vec=c()
@@ -22,17 +23,14 @@ sampling_func=function(dist, status, z1, z2){
   return(time_vec)
 }
 
-A=function(n, obs, status, covariate, beta, sigma, CCH=NULL){
+A=function(n, obs, status, covariate, beta, sigma){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
-  obs.per=c()
-  for(i in 1:n){
-    obs.per[i]=which(obs==SF$time[i])
-  }
-  if(is.null(CCH)) pn=1 else pn=CCH
+  obs.per=match(x = SF$time, table = obs)
+  
   sum.list=list()
   for(i in 1:n){
-    sum.list[[i]]=ifelse(status[obs.per[i]]==1, 1, ifelse(any(is.na(covariate[obs.per[i],]))==F, 1/pn, 0))*ifelse(status[which(obs==SF$time[i])]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[obs.per[i]])-as.numeric((covariate%*%beta)[obs.per[i]]))/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)/as.numeric(sqrt(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],]))*outer(covariate[obs.per[i],], covariate[obs.per[i],])
+    sum.list[[i]]=ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[obs.per[i]])-as.numeric((covariate%*%beta)[obs.per[i]]))/sqrt(as.numeric(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],])), 0, 1)/as.numeric(sqrt(t(covariate[obs.per[i],])%*%sigma%*%covariate[obs.per[i],]))*outer(covariate[obs.per[i],], covariate[obs.per[i],])
   }
   sum.list=na.omit.list(sum.list)
   return(1/n*Reduce('+', sum.list))
@@ -43,20 +41,17 @@ gamma=function(tau, n, obs, status, covariate, beta){
   km.cens=SF$surv
   obs.per=match(x = SF$time, table = obs)
   sum.mat.1=list()
-  
-  for(i in 1:n){
-    sum.mat.1[[i]]=outer(covariate[obs.per[i],], covariate[obs.per[i],])*as.numeric((ifelse(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]]<=0 & status[obs.per[i]]==1, 1/km.cens[i], 0)-tau))^2
-  }
-  
   l=list() ; ll=list()
   for(i in 1:n){
+    sum.mat.1[[i]]=outer(covariate[obs.per[i],], covariate[obs.per[i],])*((ifelse(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]]<=0 & status[obs.per[i]]==1, 1/km.cens[i], 0)-tau))^2
+    
     sub.list=list() ; divider=c()
     for(j in 1:n){
-      sub.list[[j]]=covariate[obs.per[j],]*as.numeric(ifelse(obs[obs.per[j]]>=obs[obs.per[i]], 1, 0)*ifelse(obs[obs.per[j]]<=exp((covariate%*%beta)[obs.per[j]]) & status[obs.per[j]]==1, 1/(km.cens[j]), 0))
-      divider[j]=ifelse(obs[obs.per[i]]<=obs[obs.per[j]], 1, 0)
+      sub.list[[j]]=covariate[i,]*(ifelse(obs[obs.per[j]]>=obs[i], 1, 0)*ifelse(obs[obs.per[j]]<=exp((covariate%*%beta)[obs.per[j]]) & status[obs.per[j]]==1, 1/(km.cens[j]), 0))
+      divider[j]=ifelse(obs[i]<=obs[obs.per[j]], 1, 0)
     }
     ll[[i]]=Reduce('+', sub.list)/sum(divider)
-    l[[i]]=ifelse(status[obs.per[i]]==0, 1, 0)*outer(ll[[i]], ll[[i]])
+    l[[i]]=ifelse(status[i]==0, 1, 0)*outer(ll[[i]], ll[[i]])
   }
   return(1/n*Reduce('+', sum.mat.1)-1/n*Reduce('+', l))
 }
@@ -108,7 +103,7 @@ CCHD=function(rate, data, status){
 }
 
 # Iterative Method
-Iter_simulation=function(m, N, Dist, L, Tau, Cohort=F){
+Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
   repeat{
   Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
@@ -130,14 +125,31 @@ Iter_simulation=function(m, N, Dist, L, Tau, Cohort=F){
   else if(length(KME$time)==N){
     repeat.beta=list(c(-1.431, 1, 0.756)) ; repeat.cov=list(naive.cov) ; j=2
     repeat{
-      repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))%*%smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau))
-      V.cov=gamma(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]])
-      repeat.cov[[j]]=1/N*solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))%*%V.cov%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status))
-      if(sqrt(sum((repeat.beta[[j]]-repeat.beta[[j-1]])^2))<10^(-4)|length(repeat.beta)==50) break else j=j+1
+      if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))==F) {repeat.beta[[j]]=NULL ; break}
+      
+      else{
+      repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))%*%smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau))
+      boot.list=list()
+      for(k in 1:B){
+        Eta=rexp(n = N, rate = 1)
+        boot.list[[k]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], eta = Eta)
+      }
+      
+      boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
+      boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
+      
+      V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)
+      repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))%*%V.cov%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))
+      if(max(abs((repeat.beta[[j]]-repeat.beta[[j-1]])))<10^(-2)|length(repeat.beta)==50) break else j=j+1
+      }
     }
+
+    if(is.null(repeat.beta[[length(repeat.beta)]])==T) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
+    else{
     m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
     boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
-   }
+    }
+  }
   i=i+1
   if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
   }
@@ -150,14 +162,11 @@ Iter_simulation=function(m, N, Dist, L, Tau, Cohort=F){
   return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
 }
 
-set.seed(300)
-NormComp100.6=Iter_simulation(m = 100, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+NormComp100.8=Iter_simulation(m = 100, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
 
-set.seed(300)
-NormComp500.4=Iter_simulation(m = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+NormComp500.7=Iter_simulation(m = 500, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
 
-set.seed(300)
-NormComp1000=Iter_simulation(m = 1000, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
+NormComp1000=Iter_simulation(m = 1000, B = 500, N = 300, Dist = 'normal', L = 5, Tau = 0.2)
 
 #IS-MB method
 ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
@@ -227,11 +236,3 @@ set.seed(300)
 normal.model.cch.1000=ISMB_simulation_function(m = 1000, B = 500, N = 1500, Dist = 'normal', L = 1, Tau = 0.2, Cohort = T)
 
 pfcmp=as.vector(rq(formula = log(Obs[Obs.per])~COVAR[,-1], tau = 0.2, weights = Weight, na.action = na.omit)$coefficients)
-
-boot.list=list()
-for(k in 1:B){
-  Eta=rexp(n = N, rate = 1)
-  boot.list[[k]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], eta = Eta, CCH = CCH_status)
-}
-boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})

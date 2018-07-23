@@ -1,4 +1,4 @@
-library(survival) ; library(BB)
+library(survival)
 na.omit.list=function(y) { return(y[!sapply(y, function(x) all(is.na(x)))]) }
 inverse.check=function(m) class(try(solve(m),silent=T))=="matrix"
 quadform=function(A,x) {return(colSums(x * (A %*% x)))}
@@ -33,16 +33,19 @@ sampling_func=function(dist, status, z1, z2){
 A=function(n, obs, status, covariate, beta, sigma){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
-  obs.per=match(x = SF$time, table = obs)
+  obs.per=order(obs) ; obs=obs[obs.per]
+  status=status[obs.per] ; covariate=covariate[obs.per,]
   
-  status=setdiff(x = 1:n, y = which(is.na(covariate[,1])))
-  covariate=covariate[!rowSums(is.finite(covariate)),]
-  
+  no.na=setdiff(x = 1:n, which(is.na(covariate[,1])))
+  obs=obs[no.na]
+  status=status[no.na]
+  km.cens=km.cens[no.na]
+  covariate=covariate[no.na,]
+
   sum.list=list()
   for(i in 1:length(status)){
-    sum.list[[i]]=(ifelse(status[obs.per[i]]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[obs.per[i]])-as.numeric((covariate%*%beta)[obs.per[i]]))/sqrt(quadform(sigma, covariate[obs.per[i],])), 0, 1)/sqrt(quadform(sigma, covariate[obs.per[i],])))*outer(covariate[obs.per[i],], covariate[obs.per[i],])
+    sum.list[[i]]=(ifelse(status[i]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)/sqrt(quadform(sigma, covariate[i,])))*outer(covariate[i,], covariate[i,])
   }
-  sum.list=na.omit.list(sum.list)
   return(1/n*Reduce('+', sum.list))
 }
 
@@ -97,19 +100,23 @@ smoothed.gamma=function(tau, n, obs, status, covariate, beta, CCH=NULL){
 smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
-  obs.per=match(x = SF$time, table = obs)
-  if(is.null(CCH)) pn=1 else pn=CCH
+  obs.per=order(obs) ; obs=obs[obs.per]
+  status=status[obs.per] ; covariate=covariate[obs.per,]
   
-  status=setdiff(x = 1:n, y = which(is.na(covariate[,1])))
-  covariate=covariate[!rowSums(is.finite(covariate)),]
+  no.na=setdiff(x = 1:n, which(is.na(covariate[,1])))
+  obs=obs[no.na]
+  status=status[no.na]
+  km.cens=km.cens[no.na]
+  covariate=covariate[no.na,]
+  if(is.null(CCH)==T) pn=1 else pn=CCH
   
   sum.list=list()
   for(i in 1:length(status)){
-    if(status[obs.per[i]]==1){
-      sum.list[[i]]=as.vector(covariate[obs.per[i],])*(1/km.cens[i]*pnorm(-(log(obs[obs.per[i]])-as.numeric((covariate%*%beta)[obs.per[i]]))/sqrt(quadform(sigma, covariate[obs.per[i],])), 0, 1)-tau)
+    if(status[i]==1){
+      sum.list[[i]]=as.vector(covariate[i,])*(1/km.cens[i]*pnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)-tau)
     }
     else{
-      sum.list[[i]]=-ifelse(any(is.na(covariate[obs.per[i],]))==F, 1/pn, 0)*covariate[obs.per[i],]*tau
+      sum.list[[i]]=-covariate[i,]*tau/pn
     }
   }
   sum.list=na.omit.list(sum.list)
@@ -120,19 +127,23 @@ smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
 boot.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta, CCH=NULL){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
-  obs.per=match(x = SF$time, table = obs)
-  if(is.null(CCH)) pn=1 else pn=CCH
+  obs.per=order(obs) ; obs=obs[obs.per]
+  status=status[obs.per] ; covariate=covariate[obs.per,]
   
-  status=setdiff(x = 1:n, y = which(is.na(covariate[,1])))
-  covariate=covariate[!rowSums(is.finite(covariate)),]
+  no.na=setdiff(x = 1:n, which(is.na(covariate[,1])))
+  obs=obs[no.na]
+  status=status[no.na]
+  km.cens=km.cens[no.na]
+  covariate=covariate[no.na,]
+  if(is.null(CCH)==T) pn=1 else pn=CCH
   
   sum.list=list()
   for(i in 1:length(status)){
-    if(status[obs.per[i]]==1){
-      sum.list[[i]]=eta[[obs.per[i]]]*as.vector(covariate[obs.per[i],])*(1/km.cens[i]*pnorm(-(log(obs[obs.per[i]])-as.numeric((covariate%*%beta)[obs.per[i]]))/sqrt(quadform(sigma, covariate[obs.per[i],])), 0, 1)-tau)
+    if(status[i]==1){
+      sum.list[[i]]=eta[[i]]*as.vector(covariate[i,])*(1/km.cens[i]*pnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)-tau)
     }
     else{
-      sum.list[[i]]=-eta[[obs.per[i]]]*ifelse(any(is.na(covariate[obs.per[i],]))==F, 1/pn, 0)*covariate[obs.per[i],]*tau
+      sum.list[[i]]=-eta[[i]]*covariate[i,]*tau/pn
     }
   }
   sum.list=na.omit.list(sum.list)
@@ -238,7 +249,7 @@ Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
           
           V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)          
           repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), V.cov)%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}

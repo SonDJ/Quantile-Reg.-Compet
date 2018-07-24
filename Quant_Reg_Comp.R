@@ -3,6 +3,7 @@ na.omit.list=function(y) { return(y[!sapply(y, function(x) all(is.na(x)))]) }
 inverse.check=function(m) class(try(solve(m),silent=T))=="matrix"
 quadform=function(A,x) {return(colSums(x * (A %*% x)))}
 norm_vec <- function(x) sqrt(sum(x^2))
+quadform.vec=function(Z, sig) {diag(Z%*%sig%*%t(Z))}
 
 cause_sampling_func=function(z){
   sample_vec=c()
@@ -11,7 +12,7 @@ cause_sampling_func=function(z){
       sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(0.8, 0.2))
     }
     else{
-      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(0.6, 0.4))
+      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(0.7, 0.3))
     }
   }
   return(sample_vec)
@@ -41,12 +42,12 @@ A=function(n, obs, status, covariate, beta, sigma){
   status=status[no.na]
   km.cens=km.cens[no.na]
   covariate=covariate[no.na,]
-
-  sum.list=list()
-  for(i in 1:length(status)){
-    sum.list[[i]]=(ifelse(status[i]==1, 1/km.cens[i], 0)*dnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)/sqrt(quadform(sigma, covariate[i,])))*outer(covariate[i,], covariate[i,])
-  }
-  return(1/n*Reduce('+', sum.list))
+  
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  
+  dnorm.vec=dnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)/sqrt(quadvec)
+  weight=ifelse(status==1, 1/km.cens, 0)
+  return(1/n*t(covariate)%*%diag(weight*dnorm.vec)%*%covariate)
 }
 
 gamma=function(tau, n, obs, status, covariate, beta, CCH=NULL){
@@ -110,17 +111,12 @@ smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
   covariate=covariate[no.na,]
   if(is.null(CCH)==T) pn=1 else pn=CCH
   
-  sum.list=list()
-  for(i in 1:length(status)){
-    if(status[i]==1){
-      sum.list[[i]]=as.vector(covariate[i,])*(1/km.cens[i]*pnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)-tau)
-    }
-    else{
-      sum.list[[i]]=-covariate[i,]*tau/pn
-    }
-  }
-  sum.list=na.omit.list(sum.list)
-  return(1/n*Reduce('+', sum.list))
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  weight.vec=ifelse(status==1, 1/km.cens, 0)
+  pnorm.vec=pnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)
+  cc.weight=ifelse(status==1, 1, 1/pn)
+  
+  return(1/n*colSums(sweep(covariate, MARGIN = 1, cc.weight*(weight.vec*pnorm.vec-rep(tau, length(status))), '*')))
 }
 
 #MB method
@@ -135,19 +131,15 @@ boot.smooth.est.eq=function(tau, n, obs, status, covariate, beta, sigma, eta, CC
   status=status[no.na]
   km.cens=km.cens[no.na]
   covariate=covariate[no.na,]
+  eta=eta[no.na]
   if(is.null(CCH)==T) pn=1 else pn=CCH
   
-  sum.list=list()
-  for(i in 1:length(status)){
-    if(status[i]==1){
-      sum.list[[i]]=eta[[i]]*as.vector(covariate[i,])*(1/km.cens[i]*pnorm(-(log(obs[i])-as.numeric((covariate%*%beta)[i]))/sqrt(quadform(sigma, covariate[i,])), 0, 1)-tau)
-    }
-    else{
-      sum.list[[i]]=-eta[[i]]*covariate[i,]*tau/pn
-    }
-  }
-  sum.list=na.omit.list(sum.list)
-  return(1/n*Reduce('+', sum.list))
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  weight.vec=ifelse(status==1, 1/km.cens, 0)
+  pnorm.vec=pnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)
+  cc.weight=ifelse(status==1, 1, 1/pn)
+  
+  return(1/n*colSums(sweep(covariate, MARGIN = 1, eta*cc.weight*(weight.vec*pnorm.vec-rep(tau, length(status))), '*')))
 }
 
 #Case-cohort design
@@ -231,7 +223,7 @@ Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
     }
     
     else if(length(KME$time)==N){
-      repeat.beta=list(c(-1.431, 1, 0.756)) ; repeat.cov=list(naive.cov) ; j=2
+      repeat.beta=list(c(-1.566, 1, 0.891)) ; repeat.cov=list(naive.cov) ; j=2
       repeat{
         if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))==F|any(is.nan(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]])))==T) {repeat.beta[[j]]=NA ; break}
         

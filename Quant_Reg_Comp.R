@@ -4,15 +4,32 @@ inverse.check=function(m) class(try(solve(m),silent=T))=="matrix"
 quadform=function(A,x) {return(colSums(x * (A %*% x)))}
 norm_vec=function(x) return(sqrt(sum(x^2)))
 quadform.vec=function(Z, sig) {return(diag(Z%*%sig%*%t(Z)))}
+censoring_rate=function(N, Dist, Cohort, L, numrep=1e+03){
+  num.cens=c()
+  for(i in 1:numrep){
+    Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+    Eps.fail=cause_sampling_func(Z2, p0 = ifelse(Cohort==T, 0.9, 0.7), p1 = ifelse(Cohort==T, 0.7, 0.8))
+    time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
+    if(Cohort==T){
+      cens=mixture_censoring_sample(num = N, l = L)
+    } else{
+      cens=runif(n = N, min = 0, max = L)
+    }
+    Obs=ifelse(cens>time, time, cens)
+    Eps=ifelse(Obs==cens, 0, Eps.fail)
+    num.cens[i]=length(which(Eps==0))
+  }
+  return(mean(num.cens)/N)
+}
 
-cause_sampling_func=function(z){
+cause_sampling_func=function(z,p0,p1){
   sample_vec=c()
   for(i in 1:length(z)){
-    if(z[i]==1){
-      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(0.8, 0.2))
+    if(z[i]==0){
+      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(p0, 1-p0))
     }
     else{
-      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(0.7, 0.3))
+      sample_vec[i]=sample(x = c(1,2), size = 1, replace = T, prob = c(p1, 1-p1))
     }
   }
   return(sample_vec)
@@ -29,6 +46,29 @@ sampling_func=function(dist, status, z1, z2){
     else if(dist=='weibull') time_vec[i]=ifelse(status[i]==1, exp(-1+z1[i]+z2[i]+qweibull(unif[i], 0.5, 1)), exp(-1+z1[i]-z2[i]+qweibull(unif[i], 0.5, 1)))
   }
   return(time_vec)
+}
+
+sampling_func_new=function(status, z1, z2){
+  time_vec=c()
+  for(i in 1:length(status)){
+    if(status[i]==1){
+      time_vec[i]=mvrnorm(n = 1, mu = c(0.5*z1[i]-0.5*z2[i], 0.5*z2[i]), Sigma = matrix(c(1,0.9,0.9,1), 2))[1]
+    }
+    else{
+      time_vec[i]=mvrnorm(n = 1, mu = c(0.5*z1[i]-0.5*z2[i], 0.5*z2[i]), Sigma = matrix(c(1,0.9,0.9,1), 2))[2]
+    }
+  }
+  return(time_vec)
+}
+
+mixture_censoring_sample=function(num, l){
+  unif=runif(n = num, min = 0, max = 1)
+  censoring=c()
+  for(i in 1:num){
+    if(unif[i]>=0.8) censoring[i]=l
+    else censoring[i]=l*unif[i]
+  }
+  return(censoring)
 }
 
 A=function(n, obs, status, covariate, beta, sigma){
@@ -50,30 +90,6 @@ A=function(n, obs, status, covariate, beta, sigma){
   return(1/n*t(covariate)%*%diag(weight*dnorm.vec)%*%covariate)
 }
 
-gamma=function(tau, n, obs, status, covariate, beta, CCH=NULL){
-  SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
-  km.cens=SF$surv
-  obs.per=match(x = SF$time, table = obs)
-  if(is.null(CCH)) pn=1 else pn=CCH
-  
-  sum.mat.1=list()
-  l=list() ; ll=list()
-  for(i in 1:n){
-    h=ifelse(status[obs.per[i]]==1, 1, 0)+ifelse(status[obs.per[i]]==1, 0, 1)*ifelse(any(is.na(covariate[obs.per[i],]))==F, 1/pn, 0)
-    sum.mat.1[[i]]=h*outer(covariate[obs.per[i],], covariate[obs.per[i],])*((ifelse(log(obs[obs.per[i]])-(covariate%*%beta)[obs.per[i]]<=0 & status[obs.per[i]]==1, 1/km.cens[i], 0)-tau))^2
-    
-    sub.list=list() ; divider=c()
-    for(j in 1:n){
-      sub.list[[j]]=covariate[i,]*(ifelse(obs[obs.per[j]]>=obs[i], 1, 0)*ifelse(obs[obs.per[j]]<=exp((covariate%*%beta)[obs.per[j]]) & status[obs.per[j]]==1, 1/(km.cens[j]), 0))
-      divider[j]=ifelse(obs[i]<=obs[obs.per[j]], 1, 0)
-    }
-    ll[[i]]=Reduce('+', sub.list)/sum(divider)
-    l[[i]]=h*ifelse(status[i]==0, 1, 0)*outer(ll[[i]], ll[[i]])
-  }
-  sum.mat.1=na.omit.list(sum.mat.1) ; l=na.omit.list(l)
-  return(1/n*Reduce('+', sum.mat.1)-1/n*Reduce('+', l))
-}
-
 smooth.gamma=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
   SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
   km.cens=SF$surv
@@ -93,7 +109,43 @@ smooth.gamma=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
   cc.weight=ifelse(status==1, 1, 1/pn)
   
   mat=sweep(covariate, MARGIN = 1, cc.weight*(weight.vec*pnorm.vec-rep(tau, length(status))), '*')
-  return(1/(n^2)*t(mat)%*%mat)
+  
+  cen.vec=ifelse(status==0, 1, 0)
+  l=matrix(rep(0, length(status)*ncol(covariate)), nrow = length(status))
+  for(i in 1:length(status)){
+    l[i,]=colSums(sweep(covariate, MARGIN = 1, ifelse(obs>=obs[i], 1, 0)*pnorm.vec*weight.vec, FUN = '*'))/sum(ifelse(obs>=obs[i], 1, 0))
+  }
+
+  return(1/(n^2)*t(mat)%*%mat-1/(n^2)*t(l)%*%diag(cen.vec)%*%l)
+}
+
+smooth.gamma.new=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
+  SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
+  km.cens=SF$surv
+  obs.per=order(obs) ; obs=obs[obs.per]
+  status=status[obs.per] ; covariate=covariate[obs.per,]
+  
+  no.na=setdiff(x = 1:n, which(is.na(covariate[,1])))
+  obs=obs[no.na]
+  status=status[no.na]
+  km.cens=km.cens[no.na]
+  covariate=covariate[no.na,]
+  if(is.null(CCH)==T) pn=1 else pn=CCH
+  
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  weight.vec=ifelse(status==1, 1/km.cens, 0)
+  pnorm.vec=pnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)
+  cc.weight=ifelse(status==1, 1, 1/pn)
+  
+  mat=sweep(covariate, MARGIN = 1, (weight.vec*pnorm.vec-rep(tau, length(status))), '*')
+  
+  cen.vec=ifelse(status==0, 1, 0)
+  l=matrix(rep(0, length(status)*ncol(covariate)), nrow = length(status))
+  for(i in 1:length(status)){
+    l[i,]=colSums(sweep(covariate, MARGIN = 1, ifelse(obs>=obs[i], 1, 0)*pnorm.vec*weight.vec, FUN = '*'))/sum(ifelse(obs>=obs[i], 1, 0))
+  }
+  
+  return(1/(n^2)*t(mat-l)%*%diag(cc.weight)%*%(mat-l)+(1/n^2)*((1-pn)/pn)*t(mat)%*%diag(ifelse(status==1, 0, 1/pn))%*%mat)
 }
 
 smooth.est.eq=function(beta, tau, n, obs, status, covariate, sigma, CCH=NULL){
@@ -150,37 +202,39 @@ CCHD=function(rate, data, status){
 }
 
 # Iterative Method
-Iter_simulation_gamma=function(m, B, N, Dist, L, Tau, Cohort=F){
+Iter_simulation_gamma=function(m, N, Dist, L, Tau, Cohort=F){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
   repeat{
     Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
-    Eps.fail=cause_sampling_func(Z2)
+    P0=0.7 ; P1=0.8
+    Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
     time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
     cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(cens>time, time, cens)
     Eps=ifelse(Obs==cens, 0, Eps.fail)
-    CCH_desig=CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)
+    CCH_desig=CCHD(rate = 0.25, data = cbind(rep(1, N), Z1, Z2), status = Eps)
     if(Cohort==T) COVAR=CCH_desig[[1]] else COVAR=cbind(rep(1, N), Z1, Z2)
-    if(Cohort==T) CCH_status=0.1 else CCH_status=NULL
+    if(Cohort==T) CCH_status=0.25 else CCH_status=NULL
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
-
+    
     if(length(KME$time)<N){
       m.sol[[i]]=NULL
       boot.cov[[i]]=NULL
     }
     
     else if(length(KME$time)==N){
-      repeat.beta=list(c(-1.566, 1, 0.891)) ; repeat.cov=list(naive.cov) ; j=2
+      in.vec=c(-1+qnorm(Tau/P0), 1, 1+qnorm(Tau/P1)-qnorm(Tau/P0))
+      repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
       repeat{
         if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))==F|any(is.nan(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]])))==T) {repeat.beta[[j]]=NA ; break}
         
         else{
           repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)))
           
-          V.cov=smooth.gamma(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)
+          V.cov=smooth.gamma.new(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)
           
           repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), V.cov)%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-4)|length(repeat.beta)==50) break else j=j+1
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
@@ -221,7 +275,7 @@ Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
     }
     
     else if(length(KME$time)==N){
-      repeat.beta=list(c(-1.566, 1, 0.891)) ; repeat.cov=list(naive.cov) ; j=2
+      repeat.beta=list(c(-1+qnorm(Tau/0.7), 1, 1+qnorm(Tau/0.8)-qnorm(Tau/0.7))) ; repeat.cov=list(naive.cov) ; j=2
       repeat{
         if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))==F|any(is.nan(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]])))==T) {repeat.beta[[j]]=NA ; break}
         
@@ -282,7 +336,7 @@ Iter_simulation_A=function(m, B, N, Dist, L, Tau, Cohort=F){
     }
     
     else if(length(KME$time)==N){
-      repeat.beta=list(c(-1.431, 1, 0.756)) ; repeat.cov=list(naive.cov) ; j=2 ; A.row=list()
+      repeat.beta=list(c(-1+qnorm(Tau/0.7), 1, 1+qnorm(Tau/0.8)-qnorm(Tau/0.7))) ; repeat.cov=list(naive.cov) ; j=2 ; A.row=list()
       repeat{
         Z=mvrnorm(n = B, mu = rep(0, ncol(COVAR)), Sigma = diag(rep(1, ncol(COVAR))))
         A=matrix(data = rep(0, ncol(COVAR)^2), ncol(COVAR))
@@ -384,5 +438,3 @@ ISMB_simulation_function=function(m, B, N, Dist, L, Tau, Cohort=F){
   boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
   return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
 }
-
-pfcmp=as.vector(rq(formula = log(Obs[Obs.per])~COVAR[,-1], tau = 0.2, weights = Weight, na.action = na.omit)$coefficients)

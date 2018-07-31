@@ -1,20 +1,31 @@
-library(survival)
+library(survival) ; library(MASS)
 na.omit.list=function(y) { return(y[!sapply(y, function(x) all(is.na(x)))]) }
 inverse.check=function(m) class(try(solve(m),silent=T))=="matrix"
 quadform=function(A,x) {return(colSums(x * (A %*% x)))}
 norm_vec=function(x) return(sqrt(sum(x^2)))
 quadform.vec=function(Z, sig) {return(diag(Z%*%sig%*%t(Z)))}
-censoring_rate=function(N, Dist, Cohort, L, numrep=1e+03){
+
+censoring_rate=function(N, Dist, L, numrep=1e+03){
   num.cens=c()
   for(i in 1:numrep){
     Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
-    Eps.fail=cause_sampling_func(Z2, p0 = ifelse(Cohort==T, 0.9, 0.7), p1 = ifelse(Cohort==T, 0.7, 0.8))
+    Eps.fail=cause_sampling_func(Z2, p0 = 0.7, p1 = 0.8)
     time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
-    if(Cohort==T){
-      cens=mixture_censoring_sample(num = N, l = L)
-    } else{
-      cens=runif(n = N, min = 0, max = L)
-    }
+    cens=runif(n = N, min = 0, max = L)
+    Obs=ifelse(cens>time, time, cens)
+    Eps=ifelse(Obs==cens, 0, Eps.fail)
+    num.cens[i]=length(which(Eps==0))
+  }
+  return(mean(num.cens)/N)
+}
+
+censoring_rate_new=function(N, L, numrep=1e+03){
+  num.cens=c()
+  for(i in 1:numrep){
+    Z1=runif(n = N, min = 0, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+    Eps.fail=cause_sampling_func(Z2, p0 = 0.9, p1 = 0.7)
+    time=exp(sampling_func_new(status = Eps.fail, z1 = Z1, z2 = Z2))
+    cens=runif(n = N, min = 0, max = L)
     Obs=ifelse(cens>time, time, cens)
     Eps=ifelse(Obs==cens, 0, Eps.fail)
     num.cens[i]=length(which(Eps==0))
@@ -59,16 +70,6 @@ sampling_func_new=function(status, z1, z2){
     }
   }
   return(time_vec)
-}
-
-mixture_censoring_sample=function(num, l){
-  unif=runif(n = num, min = 0, max = 1)
-  censoring=c()
-  for(i in 1:num){
-    if(unif[i]>=0.8) censoring[i]=l
-    else censoring[i]=l*unif[i]
-  }
-  return(censoring)
 }
 
 A=function(n, obs, status, covariate, beta, sigma){
@@ -234,7 +235,7 @@ Iter_simulation_gamma=function(m, N, Dist, L, Tau, Cohort=F){
           V.cov=smooth.gamma.new(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)
           
           repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), V.cov)%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-4)|length(repeat.beta)==50) break else j=j+1
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
@@ -253,6 +254,59 @@ Iter_simulation_gamma=function(m, N, Dist, L, Tau, Cohort=F){
   sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
   boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
   return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
+}
+
+Iter_simulation_gamma_new=function(m, N, L, Tau, Cohort=F){
+  naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
+  repeat{
+    Z1=runif(n = N, min = 0, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
+    P0=0.9 ; P1=0.7
+    Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
+    time=exp(sampling_func_new(status = Eps.fail, z1 = Z1, z2 = Z2))
+    cens=runif(n = N, min = 0, max = L)
+    Obs=ifelse(cens>time, time, cens)
+    Eps=ifelse(Obs==cens, 0, Eps.fail)
+    CCH_desig=CCHD(rate = 0.25, data = cbind(rep(1, N), Z1, Z2), status = Eps)
+    if(Cohort==T) COVAR=CCH_desig[[1]] else COVAR=cbind(rep(1, N), Z1, Z2)
+    if(Cohort==T) CCH_status=0.25 else CCH_status=NULL
+    KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
+    
+    if(length(KME$time)<N){
+      m.sol[[i]]=NULL
+      boot.cov[[i]]=NULL
+    }
+    
+    else if(length(KME$time)==N){
+      in.vec=c(qnorm(Tau/P0), 0.5, -0.5+qnorm(Tau/P1)-qnorm(Tau/P0))
+      repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
+      repeat{
+        if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))==F|any(is.nan(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]])))==T) {repeat.beta[[j]]=NA ; break}
+        
+        else{
+          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)))
+          
+          V.cov=smooth.gamma.new(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau)
+          
+          repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]), V.cov)%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]]))
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
+        }
+      }
+      if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
+      else{
+        m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
+        boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
+      }
+    }
+    i=i+1
+    if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
+  }
+  m.sol=Filter(Negate(is.null), m.sol)
+  boot.cov=Filter(Negate(is.null), boot.cov)
+  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
+  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
+  sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
+  boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
+  return(list(1/length(m.sol)*Reduce('+', m.sol)-c(qnorm(Tau/P0), 0.5, -0.5+qnorm(Tau/P1)-qnorm(Tau/P0)), sample.cov.mat, boot.mat))
 }
 
 Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
@@ -297,79 +351,6 @@ Iter_simulation=function(m, B, N, Dist, L, Tau, Cohort=F){
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
-      else{
-        m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
-        boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
-      }
-    }
-    i=i+1
-    if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
-  }
-  m.sol=Filter(Negate(is.null), m.sol)
-  boot.cov=Filter(Negate(is.null), boot.cov)
-  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
-  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
-  sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
-  boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
-  return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
-}
-
-Iter_simulation_A=function(m, B, N, Dist, L, Tau, Cohort=F){
-  naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
-  repeat{
-    Z1=runif(n = N, min = -1, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
-    Eps.fail=cause_sampling_func(Z2)
-    time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
-    cens=runif(n = N, min = 0, max = L)
-    Obs=ifelse(cens>=time, time, cens)
-    Eps=ifelse(Obs==cens, 0, Eps.fail)
-    CCH_desig=CCHD(rate = 0.1, data = cbind(rep(1, N), Z1, Z2), status = Eps)
-    if(Cohort==T) COVAR=CCH_desig[[1]] else COVAR=cbind(rep(1, N), Z1, Z2)
-    if(Cohort==T) CCH_status=CCH_desig[[2]] else CCH_status=NULL
-    KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
-    Obs.per=match(x = KME$time, table = Obs)
-    Weight=ifelse(Eps[Obs.per]==1, 1/KME$surv, 0)
-    
-    if(length(KME$time)<N){
-      m.sol[[i]]=NULL
-      boot.cov[[i]]=NULL
-    }
-    
-    else if(length(KME$time)==N){
-      repeat.beta=list(c(-1+qnorm(Tau/0.7), 1, 1+qnorm(Tau/0.8)-qnorm(Tau/0.7))) ; repeat.cov=list(naive.cov) ; j=2 ; A.row=list()
-      repeat{
-        Z=mvrnorm(n = B, mu = rep(0, ncol(COVAR)), Sigma = diag(rep(1, ncol(COVAR))))
-        A=matrix(data = rep(0, ncol(COVAR)^2), ncol(COVAR))
-        for(l in 1:ncol(COVAR)){
-          y=c()
-          for(t in 1:B){
-            y[t]=(N^(1/2))*smooth.est.eq(beta = (repeat.beta[[j-1]]+(N^(-1/2))*Z[t,]), tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, sigma = repeat.cov[[j-1]], CCH = CCH_status)[l]
-          }
-          df = cbind(y, Z) ; df=as.data.frame(df)
-          colnames(df)=c('y', paste0('x',1:ncol(COVAR)))
-          A[l,]=as.vector(lm(formula = y~x1+x2+x3+0, data = df)$coefficients)
-        }
-        
-        if(inverse.check(A)==F) {repeat.beta[[j]]=NA ; break}
-        
-        else{
-          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A)%*%smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], CCH = CCH_status, tau = Tau))
-          boot.list=list()
-          for(k in 1:B){
-            Eta=rexp(n = N, rate = 1)
-            boot.list[[k]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], eta = Eta)
-          }
-          
-          boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-          boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
-          
-          V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)
-          repeat.cov[[j]]=solve(A)%*%V.cov%*%solve(A)
-          if(max(abs((repeat.beta[[j]]-repeat.beta[[j-1]])))<10^(-2)|length(repeat.beta)==50) break else j=j+1
-        }
-      }
-      
-      if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
       else{
         m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
         boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]

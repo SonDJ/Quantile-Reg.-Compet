@@ -137,8 +137,8 @@ smooth.gamma=function(beta, tau, obs, status, covariate, sigma, cohort.sample=NU
   km.cens=SF$surv
   obs.per=order(obs) 
   obs=obs[obs.per] 
-  case.weight=case.weight[obs.per]
-  cc.weight=cc.weight[obs.per]
+  case.weight=case.weight[obs.per] ; case.sample=case.sample[obs.per]
+  cc.weight=cc.weight[obs.per] ; cohort.sample=cohort.sample[obs.per]
   status=status[obs.per] 
   covariate=covariate[obs.per,]
   
@@ -379,7 +379,7 @@ Iter_simulation_gamma_new=function(m, N, L, Tau, Cohort=F, Case.Sample=F){
     Obs=ifelse(cens>time, time, cens)
     Eps=ifelse(Obs==cens, 0, Eps.fail)
     COVAR=cbind(rep(1, N), Z1, Z2)
-    if(isFALSE(Case.Sample)) CS=NULL else CS=0.5
+    if(isFALSE(Case.Sample)) CS=NULL else CS=0.8
     CCH_desig=CCHD(rate = 0.2, data = cbind(rep(1, N), Z1, Z2), status = Eps, case.sampling = CS)
     if(Cohort==T) CCH_status=CCH_desig[[1]] else CCH_status=NULL
     if(Case.Sample==T) Case_status=CCH_desig[[2]] else Case_status=NULL

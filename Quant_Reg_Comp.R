@@ -119,6 +119,30 @@ A=function(obs, status, covariate, beta, sigma, case.sample=NULL, cohort.sample=
   return(1/n*t(covariate)%*%diag((cc.weight+case.weight+other.weight)*weight*dnorm.vec)%*%covariate)
 }
 
+A.strat=function(obs, status, covariate, beta, sigma, other.weight=NULL){
+  n=length(status)
+  if(is.null(other.weight)==T){
+    other.weight=rep(1, n)
+  } else {
+    other.weight=other.weight
+  }
+  
+  SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
+  km.cens=SF$surv
+  obs.per=order(obs) 
+  obs=obs[obs.per] 
+  status=status[obs.per] 
+  covariate=covariate[obs.per,] 
+  other.weight=other.weight[obs.per]
+  
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  
+  dnorm.vec=dnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)/sqrt(quadvec)
+  weight=ifelse(status==1, 1/km.cens, 0)
+  
+  return(1/n*t(covariate)%*%diag(other.weight*weight*dnorm.vec)%*%covariate)
+}
+
 smooth.gamma=function(beta, tau, obs, status, covariate, sigma, cohort.sample=NULL, case.sample=NULL){
   n=length(obs)
   if(is.null(case.sample)==T) {
@@ -235,6 +259,29 @@ smooth.est.eq=function(beta, tau, obs, status, covariate, sigma, cohort.sample=N
   pnorm.vec=pnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)
   
   return(1/n*colSums(sweep(covariate, MARGIN = 1, (cc.weight+case.weight+other.weight)*(weight.vec*pnorm.vec-rep(tau, length(status))), '*')))
+}
+
+smooth.est.eq.strat=function(beta, tau, obs, status, covariate, sigma, other.weight=NULL){
+  n=length(obs)
+  if(is.null(other.weight)){
+    other.weight=rep(1, n)
+  } else {
+    other.weight=other.weight
+  }
+  
+  SF=survfit(formula = Surv(time = obs, event = ifelse(status==0, 1, 0))~1)
+  km.cens=SF$surv
+  obs.per=order(obs)
+  obs=obs[obs.per]
+  status=status[obs.per] 
+  covariate=covariate[obs.per,]
+  other.weight=other.weight[obs.per]
+  
+  quadvec=quadform.vec(Z = covariate, sig = sigma)
+  weight.vec=ifelse(status==1, 1/km.cens, 0)
+  pnorm.vec=pnorm(-(log(obs)-as.vector(covariate%*%beta))/sqrt(quadvec), 0, 1)
+  
+  return(1/n*colSums(sweep(covariate, MARGIN = 1, other.weight*(weight.vec*pnorm.vec-rep(tau, length(status))), '*')))
 }
 
 #MB method
@@ -439,7 +486,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
     Eps=ifelse(Obs==cens, 0, Eps.fail)
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
     COVAR=cbind(rep(1,N), Z1, Z2)
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = min(length(which(New.Strata==2)), length(which(New.Strata==1))))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = min(length(which(New.Strata==2)), length(which(New.Strata==1)))*0.8)
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -451,20 +498,20 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
       in.vec=c(qnorm(Tau/P0), 0.5, -0.5+qnorm(Tau/P1)-qnorm(Tau/P0))
       repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
       repeat{
-        if(inverse.check(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.beta[[j]]=NA ; break}
+        if(inverse.check(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.beta[[j]]=NA ; break}
         
         else{
-          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
+          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
           
           V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
           
-          if(inverse.check(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.cov[[j]]=NA ; break}
+          if(inverse.check(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.cov[[j]]=NA ; break}
           
           else{
-            repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
+            repeat.cov[[j]]=1/N*solve(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
           }
           
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|any(is.na(repeat.cov[[length(repeat.cov)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}

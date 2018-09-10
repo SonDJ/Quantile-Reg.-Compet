@@ -38,6 +38,17 @@ censoring_rate_new=function(N, L, numrep=1e+03){
   return(mean(num.cens)/N)
 }
 
+status_prop=function(N, numrep=1e+03){
+  ratio=c()
+  for(i in 1:numrep){
+    Z2=rbinom(n = N, size = 1, prob = 0.5)
+    P0=0.9 ; P1=0.7
+    Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
+    ratio[i]=length(which(Eps.fail==1))/length(which(Eps.fail==2))
+  }
+  return(mean(ratio))
+}
+
 cause_sampling_func=function(z,p0,p1){
   sample_vec=c()
   for(i in 1:length(z)){
@@ -213,7 +224,7 @@ smooth.gamma.stratified=function(beta, tau, obs, status, covariate, sigma, strat
     alpha=str_num_vec/n
     p_vec=(strata_list[[3]])/str_num_vec
     strata_ind_list=lapply(apply(str_mat, 2, list), unlist)
-    V_list=lapply(strata_ind_list, function(x){1/n*t(sweep(mat+l, MARGIN = 1, x, FUN = '*'))%*%diag(str_weight)%*%sweep(mat+l, MARGIN = 1, x, FUN = '*')})
+    V_list=lapply(strata_ind_list, function(x){1/n*t(sweep(mat+l, MARGIN = 1, x, FUN = '*'))%*%diag(str_weight)%*%sweep(mat+l, MARGIN = 1, x, FUN = '*')-1/(n^2)*t(sweep(mat+l, MARGIN = 1, x*str_weight, FUN = '*'))%*%sweep(mat+l, MARGIN = 1, x*str_weight, FUN = '*')})
     V_list_prod=Map(f = "*", V_list, (1-p_vec)*alpha/p_vec)
     
     return(1/n*t(mat+l)%*%diag(str_weight)%*%(mat+l)+Reduce('+', V_list_prod))
@@ -475,7 +486,7 @@ Iter_simulation_gamma_new=function(m, N, L, Tau, Cohort=F, Case.Sample=F){
 Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
   repeat{
-    Z1=runif(n = N, min = 0, max = 1)
+    Z1=runif(n = N, min = -1, max = 1)
     Copula=rCopula(n = N, copula = normalCopula(0.9, dim = 2))
     Z2=qbinom(p = Copula[,1], size = 1, prob = 0.5)
     Z3=qbinom(p = Copula[,2], size = 1, prob = 0.5)
@@ -487,7 +498,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
     Eps=ifelse(Obs==cens, 0, Eps.fail)
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
     COVAR=cbind(rep(1,N), Z1, Z2)
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 30, 70))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 60, 140))
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -512,7 +523,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
             repeat.cov[[j]]=1/N*solve(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A.strat(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
           }
           
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
+          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
         }
       }
       if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|any(is.na(repeat.cov[[length(repeat.cov)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}

@@ -372,6 +372,23 @@ stratified_sampling=function(str.var, size){
   return(list(strata_matrix, rowSums(weight_matrix), sapply(str_sample_list, FUN = length)))
 }
 
+NewtonRhapson=function(covariate){
+  repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
+  repeat{
+    if(inverse.check(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status))==F|any(is.nan(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status)))==T) {repeat.beta[[j]]=NA ; break}
+    
+    else{
+      repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, cohort.sample = CCH_status, case.sample = Case_status)))
+      
+      V.cov=smooth.gamma(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, cohort.sample = CCH_status, case.sample = Case_status)
+      
+      repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status))
+      if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
+    }
+  }
+}
+
+
 # Iterative Method
 Iter_simulation_gamma=function(m, N, Dist, L, Tau, Cohort=F, Case.Sample=F){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
@@ -487,9 +504,9 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
   repeat{
     Z1=runif(n = N, min = -1, max = 1)
-    Copula=rCopula(n = N, copula = normalCopula(0.9, dim = 2))
+    Copula=rCopula(n = N, copula = normalCopula(0.5, dim = 2))
     Z2=qbinom(p = Copula[,1], size = 1, prob = 0.5)
-    Z3=qbinom(p = Copula[,2], size = 1, prob = 0.5)
+    Z3=qbinom(p = Copula[,2], size = 1, prob = 0.8)
     P0=0.9 ; P1=0.7
     Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
     time=exp(sampling_func_new(status = Eps.fail, z1 = Z1, z2 = Z2))
@@ -498,7 +515,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
     Eps=ifelse(Obs==cens, 0, Eps.fail)
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
     COVAR=cbind(rep(1,N), Z1, Z2)
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 60, 140))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), min(100, length(which(New.Strata==2))), 100))
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -607,3 +624,16 @@ Iter_simulation=function(m, B, N, L, Tau, Cohort=F, Case.Sample=F){
   boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
   return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
 }
+
+###################real data analysis####################
+
+data(nwtsco, package = 'addhazard')
+nwtsco_new=data.frame(time=rep(0, nrow(nwtsco)), status=rep(0, nrow(nwtsco)), study=nwtsco$study, stage=nwtsco$stage, histol=nwtsco$histol, instit=nwtsco$instit, age=nwtsco$age, yr=nwtsco$yr, specwgt=nwtsco$specwgt, tumdiam=nwtsco$tumdiam)
+for(i in 1:nrow(nwtsco)){
+  if(nwtsco$relaps[i]==1 & nwtsco$dead[i]==1 & nwtsco$trel[i]<nwtsco$tsur[i]) {nwtsco_new$time[i]=nwtsco$trel[i] ; nwtsco_new$status[i]=1}
+  else if(nwtsco$relaps[i]==1 & nwtsco$dead[i]==1 & nwtsco$trel[i]==nwtsco$tsur[i]) {nwtsco_new$time[i]=nwtsco$trel[i] ; nwtsco_new$status[i]=2}
+  else if(nwtsco$relaps[i]==1 & nwtsco$dead[i]==0) {nwtsco_new$time[i]=nwtsco$trel[i] ; nwtsco_new$status[i]=1}
+  else if(nwtsco$relaps[i]==0 & nwtsco$dead[i]==1) {nwtsco_new$time[i]=nwtsco$tsur[i] ; nwtsco_new$status[i]=2}
+  else {nwtsco_new$time[i]=nwtsco$tsur[i] ; nwtsco_new$status[i]=0}
+}
+

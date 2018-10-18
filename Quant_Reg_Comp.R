@@ -686,14 +686,13 @@ Iter_simulation=function(m, B, N, L, Tau, Cohort=F, Case.Sample=F){
 }
 
 ###################real data analysis####################
-NewtonRhapson=function(COVAR, Obs, Eps, Tau, Str_list=NULL){
+NewtonRhapson=function(COVAR, Obs, Eps, Tau, In.vec, Str_list=NULL){
   N=nrow(COVAR) ; P=ncol(COVAR)+1
   COVAR=cbind(rep(1, N), as.matrix(COVAR))
   KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
   Weight=ifelse(Eps[order(Obs)]==1, 1/KME$surv, 0)
-  in.vec=as.vector(rq(formula = log(Obs[order(Obs)])~COVAR[order(Obs),-1], tau = Tau, weights = Weight, na.action = na.omit)$coefficients)
-  
-  repeat.beta=list(in.vec) ; repeat.cov=list(diag(rep(1/N, P))) ; j=2
+
+  repeat.beta=list(In.vec) ; repeat.cov=list(diag(rep(1/N, P))) ; j=2
   repeat{
     repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
     V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
@@ -703,7 +702,7 @@ NewtonRhapson=function(COVAR, Obs, Eps, Tau, Str_list=NULL){
   }
   return(list(repeat.beta[[length(repeat.beta)]], repeat.cov[[length(repeat.cov)]]))
 }
-
+                                            
 data(nwtsco, package = 'addhazard')
 Time=c() ; Status=c()
 for(i in 1:nrow(nwtsco)){

@@ -573,7 +573,54 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
   boot.mat=1/length(boot.cov)*Reduce('+', boot.cov)
   return(list((1/length(m.sol)*Reduce('+', m.sol)-in.vec), sample.cov.mat, boot.mat, 1/length(coverage)*Reduce('+', coverage)))
 }
+                                            
+Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
+  naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; coverage=list() ; i=1
+  repeat{
+    Z1=runif(n = N, min = 0, max = 1)
+    Corr_Mat=rmvbin(n = N, margprob = c(0.5, 0.5), bincorr = matrix(c(1,0.9,0.9,1),2))
+    Z2=Corr_Mat[,1]
+    Z3=Corr_Mat[,2]
+    P0=0.9 ; P1=0.7
+    Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
+    time=exp(sampling_func_new(status = Eps.fail, z1 = Z1, z2 = Z2))
+    cens=runif(n = N, min = 0, max = L)
+    Obs=pmin(time,cens)
+    Eps=(time<=cens)*Eps.fail
+    New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 90, 110))
+    KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
+    
+    if(length(KME$time)<N){
+      m.sol[[i]]=NULL
+      boot.cov[[i]]=NULL
+      coverage[[i]]=NULL
+    }
+    
+    else if(length(KME$time)==N){
+      in.vec=c(qnorm(Tau/P0), 0.5, -0.5+qnorm(Tau/P1)-qnorm(Tau/P0))
+      tryCatch({
+        NR=NewtonRhapson(COVAR = cbind(Z1,Z2), Obs = Obs, Eps = Eps, Tau = Tau, In.vec = in.vec, Str_list = Str_list)
+        m.sol[[i]]=NR[[1]]
+        boot.cov[[i]]=NR[[2]]
+        coverage[[i]]=as.numeric(m.sol[[i]]-qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))<in.vec & m.sol[[i]]+qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))>in.vec)
+      }, error = function(e){cat("ERROR :",conditionMessage(e), "\n")})
+    }
+    i=i+1
+    if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
+  }
+  m.sol=Filter(Negate(is.null), m.sol)
+  boot.cov=Filter(Negate(is.null), boot.cov)
+  coverage=Filter(Negate(is.null), coverage)
+  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
+  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
+  sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
+  boot.mat=1/length(boot.cov)*Reduce('+', boot.cov)
+  return(list((1/length(m.sol)*Reduce('+', m.sol)-in.vec), sample.cov.mat, boot.mat, 1/length(coverage)*Reduce('+', coverage)))
+}
 
+                                            
+                                            
 Iter_simulation=function(m, B, N, L, Tau, Cohort=F, Case.Sample=F){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
   repeat{

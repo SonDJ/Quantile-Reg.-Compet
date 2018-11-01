@@ -398,15 +398,14 @@ Iter_simulation_gamma=function(m, N, Dist, L, Tau, stratify=F){
     Corr_Mat=rmvbin(n = N, margprob = c(0.5, 0.5), bincorr = matrix(c(1,0.9,0.9,1),2))
     Z2=Corr_Mat[,1]
     Z3=Corr_Mat[,2]
-    P0=0.7 ; P1=0.8
+    P0=0.9 ; P1=0.7
     Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
     time=sampling_func(dist = Dist, status = Eps.fail, z1 = Z1, z2 = Z2)
     cens=runif(n = N, min = 0, max = L)
     Obs=pmin(time,cens)
     Eps=(time<=cens)*Eps.fail
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
-    COVAR=cbind(rep(1,N), Z1, Z2)
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 90, 110))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 150, 150))
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -417,30 +416,19 @@ Iter_simulation_gamma=function(m, N, Dist, L, Tau, stratify=F){
     
     else if(length(KME$time)==N){
       in.vec=c(-1+qnorm(Tau/P0), 1, 1+qnorm(Tau/P1)-qnorm(Tau/P0))
-      repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
-      repeat{
-        if(inverse.check(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.beta[[j]]=NA ; break}
-        
-        else{
-          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
+      tryCatch({
+        NR=NewtonRhapson(COVAR = cbind(Z1,Z2), Obs = Obs, Eps = Eps, Tau = Tau, In.vec = in.vec, Str_list = Str_list)
+        if(norm_vec(NR[[1]])>10){
+          m.sol[[i]]=NULL
+          boot.cov[[i]]=NULL
+          coverage[[i]]=NULL
+        } else {
+          m.sol[[i]]=NR[[1]]
+          boot.cov[[i]]=NR[[2]]
+          coverage[[i]]=as.numeric(m.sol[[i]]-qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))<in.vec & m.sol[[i]]+qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))>in.vec)
           
-          V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
-          
-          if(inverse.check(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))==F|any(is.nan(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]])))==T) {repeat.cov[[j]]=NA ; break}
-          
-          else{
-            repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
-          }
-          
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
         }
-      }
-      if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|any(is.na(repeat.cov[[length(repeat.cov)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL ; coverage[[i]]=NULL}
-      else{
-        m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
-        boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
-        coverage[[i]]=as.numeric(m.sol[[i]]-qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))<in.vec & m.sol[[i]]+qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))>in.vec)
-      }
+      }, error = function(e){cat("ERROR :",conditionMessage(e), "\n")})
     }
     i=i+1
     if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
@@ -525,7 +513,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
     Eps=(time<=cens)*Eps.fail
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
     COVAR=cbind(rep(1,N), Z1, Z2)
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 90, 110))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 100, 200))
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -573,7 +561,7 @@ Iter_simulation_stratified=function(m, N, L, Tau, stratify=FALSE){
   boot.mat=1/length(boot.cov)*Reduce('+', boot.cov)
   return(list((1/length(m.sol)*Reduce('+', m.sol)-in.vec), sample.cov.mat, boot.mat, 1/length(coverage)*Reduce('+', coverage)))
 }
-                                            
+
 Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
   naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; coverage=list() ; i=1
   repeat{
@@ -588,7 +576,7 @@ Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
     Obs=pmin(time,cens)
     Eps=(time<=cens)*Eps.fail
     New.Strata=ifelse(Eps==1, 1, ifelse(Z3==0, 2, 3))
-    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 90, 110))
+    if(isFALSE(stratify)==T) Str_list=NULL else Str_list=stratified_sampling(str.var = New.Strata, size = c(length(which(New.Strata==1)), 75, 225))
     KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
     
     if(length(KME$time)<N){
@@ -601,9 +589,16 @@ Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
       in.vec=c(qnorm(Tau/P0), 0.5, -0.5+qnorm(Tau/P1)-qnorm(Tau/P0))
       tryCatch({
         NR=NewtonRhapson(COVAR = cbind(Z1,Z2), Obs = Obs, Eps = Eps, Tau = Tau, In.vec = in.vec, Str_list = Str_list)
-        m.sol[[i]]=NR[[1]]
-        boot.cov[[i]]=NR[[2]]
-        coverage[[i]]=as.numeric(m.sol[[i]]-qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))<in.vec & m.sol[[i]]+qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))>in.vec)
+        if(norm_vec(NR[[1]])>10){
+          m.sol[[i]]=NULL
+          boot.cov[[i]]=NULL
+          coverage[[i]]=NULL
+        } else {
+          m.sol[[i]]=NR[[1]]
+          boot.cov[[i]]=NR[[2]]
+          coverage[[i]]=as.numeric(m.sol[[i]]-qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))<in.vec & m.sol[[i]]+qnorm(p = 0.975)*sqrt(diag(boot.cov[[i]]))>in.vec)
+          
+        }
       }, error = function(e){cat("ERROR :",conditionMessage(e), "\n")})
     }
     i=i+1
@@ -619,90 +614,22 @@ Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
   return(list((1/length(m.sol)*Reduce('+', m.sol)-in.vec), sample.cov.mat, boot.mat, 1/length(coverage)*Reduce('+', coverage)))
 }
 
-                                            
-                                            
-Iter_simulation=function(m, B, N, L, Tau, Cohort=F, Case.Sample=F){
-  naive.cov=diag(rep(1/N, 3), 3) ; m.sol=list() ; boot.cov=list() ; i=1
-  repeat{
-    Z1=runif(n = N, min = 0, max = 1) ; Z2=rbinom(n = N, size = 1, prob = 0.5)
-    P0=0.9 ; P1=0.7
-    Eps.fail=cause_sampling_func(Z2, p0 = P0, p1 = P1)
-    time=exp(sampling_func_new(status = Eps.fail, z1 = Z1, z2 = Z2))
-    cens=runif(n = N, min = 0, max = L)
-    Obs=ifelse(cens>time, time, cens)
-    Eps=ifelse(Obs==cens, 0, Eps.fail)
-    if(isFALSE(Case.Sample)) CS=NULL else CS=0.5
-    CCH_desig=CCHD(rate = 0.2, data = cbind(rep(1, N), Z1, Z2), status = Eps, case.sampling = CS)
-    if(Cohort==T) COVAR=CCH_desig[[1]] else COVAR=cbind(rep(1, N), Z1, Z2)
-    if(Cohort==T) CCH_status=CCH_desig[[2]] else CCH_status=NULL
-    Case_status=CCH_desig[[3]]
-    KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
-    
-    if(length(KME$time)<N){
-      m.sol[[i]]=NULL
-      boot.cov[[i]]=NULL
-    }
-    
-    else if(length(KME$time)==N){
-      in.vec=c(-1+qnorm(Tau/P0), 1, 1+qnorm(Tau/P1)-qnorm(Tau/P0))
-      repeat.beta=list(in.vec) ; repeat.cov=list(naive.cov) ; j=2
-      repeat{
-        if(inverse.check(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status))==F|any(is.nan(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status)))==T) {repeat.beta[[j]]=NA ; break}
-        
-        else{
-          repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status), smooth.est.eq(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, cohort.sample = CCH_status, case.sample = Case_status)))
-          
-          boot.list=list()
-          for(k in 1:B){
-            Eta=rexp(n = N, rate = 1)
-            boot.list[[k]]=boot.smooth.est.eq(tau = Tau, n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], eta = Eta, cohort.sample = CCH_status, case.sample = Case_status)
-          }
-          
-          boot.bar=as.vector(1/length(boot.list)*Reduce('+', boot.list))
-          boot_matrix_sum=lapply(X = boot.list, FUN = function(j){outer(j-boot.bar, j-boot.bar)})
-          
-          V.cov=1/(B-1)*Reduce('+', boot_matrix_sum)
-          
-          repeat.cov[[j]]=solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status), V.cov)%*%solve(A(n = N, obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], cohort.sample = CCH_status, case.sample = Case_status))
-          if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-2)|length(repeat.beta)==50) break else j=j+1
-        }
-      }
-      if(any(is.na(repeat.beta[[length(repeat.beta)]]))==T|norm_vec(repeat.beta[[length(repeat.beta)]])>10) {m.sol[[i]]=NULL ; boot.cov[[i]]=NULL}
-      else{
-        m.sol[[i]]=repeat.beta[[length(repeat.beta)]]
-        boot.cov[[i]]=repeat.cov[[length(repeat.cov)]]
-      }
-    }
-    i=i+1
-    if(length(Filter(Negate(is.null), m.sol))==m & length(Filter(Negate(is.null), boot.cov))==m) break
-  }
-  m.sol=Filter(Negate(is.null), m.sol)
-  boot.cov=Filter(Negate(is.null), boot.cov)
-  beta_bar=as.vector(1/length(m.sol)*Reduce('+', m.sol))
-  covariance_matrix_sum=lapply(X = m.sol, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
-  sample.cov.mat=1/(length(m.sol)-1)*Reduce('+', covariance_matrix_sum)
-  boot.mat=1/length(m.sol)*Reduce('+', boot.cov)
-  return(list(1/length(m.sol)*Reduce('+', m.sol), sample.cov.mat, boot.mat))
-}
-
-###################real data analysis####################
-NewtonRhapson=function(COVAR, Obs, Eps, Tau, In.vec, Str_list=NULL){
+NewtonRhapson=function(COVAR, Obs, Eps, Tau, In.vec=rep(0,ncol(COVAR)+1), Str_list=NULL){
   N=nrow(COVAR) ; P=ncol(COVAR)+1
-  COVAR=cbind(rep(1, N), as.matrix(COVAR))
-  KME=survfit(formula = Surv(time = Obs, event = ifelse(Eps==0, 1, 0))~1)
-  Weight=ifelse(Eps[order(Obs)]==1, 1/KME$surv, 0)
+  COVAR_int=cbind(rep(1, N), as.matrix(COVAR))
 
   repeat.beta=list(In.vec) ; repeat.cov=list(diag(rep(1/N, P))) ; j=2
   repeat{
-    repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
-    V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
-    repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
+    repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
+    V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
+    repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
     
     if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
   }
   return(list(repeat.beta[[length(repeat.beta)]], repeat.cov[[length(repeat.cov)]]))
 }
-                                            
+
+##################NWTSCO data##################
 data(nwtsco, package = 'addhazard')
 Time=c() ; Status=c()
 for(i in 1:nrow(nwtsco)){
@@ -715,6 +642,7 @@ for(i in 1:nrow(nwtsco)){
 Covariate=cbind(nwtsco$histol, nwtsco$age, ifelse(nwtsco$stage==2, 1, 0), ifelse(nwtsco$stage==3, 1, 0), ifelse(nwtsco$stage==4, 1, 0), ifelse(nwtsco$study==3, 0, 1))
 
 Full_Cohort_005=NewtonRhapson(COVAR = Covariate, Obs = Time, Eps = Status, Tau = .05)
+Full_Cohort_0075=NewtonRhapson(COVAR = Covariate, Obs = Time, Eps = Status, Tau = .075)
 Full_Cohort_01=NewtonRhapson(COVAR = Covariate, Obs = Time, Eps = Status, Tau = .1)
 Full_Cohort_0125=NewtonRhapson(COVAR = Covariate, Obs = Time, Eps = Status, Tau = .125)
 
@@ -738,10 +666,11 @@ Case_Cohort=function(rep, covariate, time, status, tau, strata){
   j=1
   repeat{
     Strata_Sampled=stratified_sampling(str.var = strata, size = c(669, 120, 160, 25, 120, 12, 146, 5, 82))
-    beta_list[[j]]=tryCatch(expr=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau, Str_list = Strata_Sampled)[[1]]
-    , error=next)
+    tryCatch({
+      beta_list[[j]]=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau, In.vec = rep(0,ncol(covariate)+1), Str_list = Strata_Sampled)[[1]]
+    }, error = function(e){cat("ERROR :",conditionMessage(e), "\n")})
     j=j+1
-    if(length(Filter(Negate(beta_list), beta_list))==rep) break
+    if(length(Filter(Negate(is.null), beta_list))==rep) break
   }
   beta_bar=as.vector(1/length(beta_list)*Reduce('+', beta_list))
   covariance_matrix_sum=lapply(X = beta_list, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
@@ -750,5 +679,37 @@ Case_Cohort=function(rep, covariate, time, status, tau, strata){
 }
 
 Case_Cohort_005=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.05, strata = Strata)
+Case_cohort_0075=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.075, strata = Strata)
 Case_Cohort_01=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.1, strata = Strata)
-Case_Cohort_0125=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.125, strata = Strata)
+
+##################WIHS data##################
+data(wihs, package = "randomForestSRC")
+mid_value=2
+wihs$time_new=ifelse(wihs$time<=mid_value, wihs$time, mid_value)
+wihs$time_new=wihs$time_new+runif(n = nrow(wihs), min = 0, max = 1.99999e-03)
+wihs$status_new=ifelse(wihs$time<=mid_value, wihs$status, 0)
+
+Covariate_wihs=wihs[,3:6]
+Time_wihs=wihs$time_new
+Status_wihs=wihs$status_new
+
+Full_Cohort_wihs_0.1=NewtonRhapson(COVAR = Covariate_wihs, Obs = Time_wihs, Eps = Status_wihs, Tau = .1)
+Full_Cohort_wihs_0.2=NewtonRhapson(COVAR = Covariate_wihs, Obs = Time_wihs, Eps = Status_wihs, Tau = .2)
+
+##################Hodgkin's Disease data##################
+data(hd, package = 'randomForestSRC')
+hd$Sex=ifelse(hd$sex=='F', 1, 0)
+hd$Treat=ifelse(hd$trtgiven=='RT', 0, 1)
+hd$Extra=ifelse(hd$extranod=='Y', 1, 0)
+hd$Clinic=hd$clinstg-1
+
+attach(hd)
+
+Full_Cohort_hd_005=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .05)
+Full_Cohort_hd_01=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .1)
+Full_Cohort_hd_015=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .15)
+Full_Cohort_hd_02=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .2)
+Full_Cohort_hd_025=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .25)
+Full_Cohort_hd_03=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .3)
+
+detach(hd)

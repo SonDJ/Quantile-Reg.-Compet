@@ -614,19 +614,28 @@ Iter_simulation_stratified_new=function(m, N, L, Tau, stratify=FALSE){
   return(list((1/length(m.sol)*Reduce('+', m.sol)-in.vec), sample.cov.mat, boot.mat, 1/length(coverage)*Reduce('+', coverage)))
 }
 
-NewtonRhapson=function(COVAR, Obs, Eps, Tau, In.vec=rep(0,ncol(COVAR)+1), Str_list=NULL){
+NewtonRhapson=function(COVAR, Obs, Eps, Tau, In.vec=rep(0,ncol(COVAR)+1), Str_list=NULL, ONE=FALSE){
   N=nrow(COVAR) ; P=ncol(COVAR)+1
   COVAR_int=cbind(rep(1, N), as.matrix(COVAR))
 
   repeat.beta=list(In.vec) ; repeat.cov=list(diag(rep(1/N, P))) ; j=2
-  repeat{
-    repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
-    V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
-    repeat.cov[[j]]=1/N*solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
-    
-    if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
+  if(isFALSE(ONE)){
+    repeat{
+      repeat.beta[[j]]=repeat.beta[[j-1]]-as.vector(qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j-1]], sigma = repeat.cov[[j-1]], tau = Tau, other.weight = Str_list[[2]])))
+      V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], tau = Tau, strata_list = Str_list)
+      repeat.cov[[j]]=1/N*qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]), V.cov)%*%qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[j]], sigma = repeat.cov[[j-1]], other.weight = Str_list[[2]]))
+      
+      if(norm_vec(repeat.beta[[j]]-repeat.beta[[j-1]])<10^(-3)|length(repeat.beta)==50) break else j=j+1
+    }
+    return(list(repeat.beta[[length(repeat.beta)]], repeat.cov[[length(repeat.cov)]]))
   }
-  return(list(repeat.beta[[length(repeat.beta)]], repeat.cov[[length(repeat.cov)]]))
+  else {
+    repeat.beta[[2]]=repeat.beta[[1]]-as.vector(qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[1]], sigma = repeat.cov[[1]], other.weight = Str_list[[2]]), smooth.est.eq(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[1]], sigma = repeat.cov[[1]], tau = Tau, other.weight = Str_list[[2]])))
+    V.cov=smooth.gamma.stratified(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[2]], sigma = repeat.cov[[1]], tau = Tau, strata_list = Str_list)
+    repeat.cov[[2]]=1/N*qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[2]], sigma = repeat.cov[[1]], other.weight = Str_list[[2]]), V.cov)%*%qr.solve(A(obs = Obs, status = Eps, covariate = COVAR_int, beta = repeat.beta[[2]], sigma = repeat.cov[[1]], other.weight = Str_list[[2]]))
+    return(list(repeat.beta[[2]], repeat.cov[[2]]))
+  }
+  
 }
 
 ##################NWTSCO data##################
@@ -660,18 +669,21 @@ for(i in 1:nrow(nwtsco)){
   else if(Status[i]!=1 & Stage[i]==1 & nwtsco$age[i]>=1 & nwtsco$histol[i]==1) Strata[i]=8
 }
 
-Case_Cohort=function(rep, covariate, time, status, tau, strata){
+nwtsco_size=c(669, 120, 160, 25, 120, 12, 146, 5, 82)
+
+Case_Cohort=function(rep, covariate, time, status, tau, strata, size_vec, one=FALSE){
   beta_list=list()
-  Full_cohort_Var=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau)[[2]]
+  Full_cohort_Var=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau, ONE = one)[[2]]
   j=1
   repeat{
-    Strata_Sampled=stratified_sampling(str.var = strata, size = c(669, 120, 160, 25, 120, 12, 146, 5, 82))
+    Strata_Sampled=stratified_sampling(str.var = strata, size = size_vec)
     tryCatch({
-      beta_list[[j]]=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau, In.vec = rep(0,ncol(covariate)+1), Str_list = Strata_Sampled)[[1]]
+      beta_list[[j]]=NewtonRhapson(COVAR = covariate, Obs = time, Eps = status, Tau = tau, In.vec = rep(0,ncol(covariate)+1), Str_list = Strata_Sampled, ONE = one)[[1]]
     }, error = function(e){cat("ERROR :",conditionMessage(e), "\n")})
     j=j+1
     if(length(Filter(Negate(is.null), beta_list))==rep) break
   }
+  beta_list=Filter(Negate(is.null), beta_list)
   beta_bar=as.vector(1/length(beta_list)*Reduce('+', beta_list))
   covariance_matrix_sum=lapply(X = beta_list, FUN = function(j){outer(j-beta_bar, j-beta_bar)})
   sample.cov.mat=1/(length(beta_list)-1)*Reduce('+', covariance_matrix_sum)
@@ -681,20 +693,7 @@ Case_Cohort=function(rep, covariate, time, status, tau, strata){
 Case_Cohort_005=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.05, strata = Strata)
 Case_cohort_0075=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.075, strata = Strata)
 Case_Cohort_01=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.1, strata = Strata)
-
-##################WIHS data##################
-data(wihs, package = "randomForestSRC")
-mid_value=2
-wihs$time_new=ifelse(wihs$time<=mid_value, wihs$time, mid_value)
-wihs$time_new=wihs$time_new+runif(n = nrow(wihs), min = 0, max = 1.99999e-03)
-wihs$status_new=ifelse(wihs$time<=mid_value, wihs$status, 0)
-
-Covariate_wihs=wihs[,3:6]
-Time_wihs=wihs$time_new
-Status_wihs=wihs$status_new
-
-Full_Cohort_wihs_0.1=NewtonRhapson(COVAR = Covariate_wihs, Obs = Time_wihs, Eps = Status_wihs, Tau = .1)
-Full_Cohort_wihs_0.2=NewtonRhapson(COVAR = Covariate_wihs, Obs = Time_wihs, Eps = Status_wihs, Tau = .2)
+Case_Cohort_0125=Case_Cohort(rep = 300, covariate = Covariate, time = Time, status = Status, tau = 0.125, strata = Strata, size_vec = nwtsco_size)
 
 ##################Hodgkin's Disease data##################
 data(hd, package = 'randomForestSRC')
@@ -702,6 +701,7 @@ hd$Sex=ifelse(hd$sex=='F', 1, 0)
 hd$Treat=ifelse(hd$trtgiven=='RT', 0, 1)
 hd$Extra=ifelse(hd$extranod=='Y', 1, 0)
 hd$Clinic=hd$clinstg-1
+hd$Inv=ifelse(hd$medwidsi=='N', 0, ifelse(hd$medwidsi=='S', 1, 2))
 
 attach(hd)
 
@@ -711,5 +711,79 @@ Full_Cohort_hd_015=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs 
 Full_Cohort_hd_02=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .2)
 Full_Cohort_hd_025=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .25)
 Full_Cohort_hd_03=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .3)
+Full_Cohort_hd_035=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .35)
+Full_Cohort_hd_04=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .4)
+Full_Cohort_hd_045=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .45)
+Full_Cohort_hd_05=NewtonRhapson(COVAR = cbind(age,Sex,Treat,Extra,Clinic), Obs = time, Eps = status, Tau = .5)
+
+detach(hd)
+
+Strata_hd=c()
+for(i in 1:nrow(hd)){
+  if(hd$status[i]==1) Strata_hd[i]=0
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==0 & hd$Extra[i]==0 & hd$Clinic[i]==0) Strata_hd[i]=1
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==0 & hd$Extra[i]==0 & hd$Clinic[i]==0) Strata_hd[i]=2
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==1 & hd$Extra[i]==0 & hd$Clinic[i]==0) Strata_hd[i]=3
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==0 & hd$Extra[i]==1 & hd$Clinic[i]==0) Strata_hd[i]=4
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==0 & hd$Extra[i]==0 & hd$Clinic[i]==1) Strata_hd[i]=5
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==1 & hd$Extra[i]==0 & hd$Clinic[i]==0) Strata_hd[i]=6
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==0 & hd$Extra[i]==1 & hd$Clinic[i]==0) Strata_hd[i]=7
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==0 & hd$Extra[i]==0 & hd$Clinic[i]==1) Strata_hd[i]=8
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==1 & hd$Extra[i]==1 & hd$Clinic[i]==0) Strata_hd[i]=9
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==1 & hd$Extra[i]==0 & hd$Clinic[i]==1) Strata_hd[i]=10
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==0 & hd$Extra[i]==1 & hd$Clinic[i]==1) Strata_hd[i]=11
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==1 & hd$Extra[i]==1 & hd$Clinic[i]==0) Strata_hd[i]=12
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==1 & hd$Extra[i]==0 & hd$Clinic[i]==1) Strata_hd[i]=13
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==0 & hd$Extra[i]==1 & hd$Clinic[i]==1) Strata_hd[i]=14
+  else if(hd$status[i]!=1 & hd$Sex[i]==0 & hd$Treat[i]==1 & hd$Extra[i]==1 & hd$Clinic[i]==1) Strata_hd[i]=15
+  else if(hd$status[i]!=1 & hd$Sex[i]==1 & hd$Treat[i]==1 & hd$Extra[i]==1 & hd$Clinic[i]==1) Strata_hd[i]=16
+}
+
+size_hd=c(291, 15, 10, 13, 4, 15, 7, 6, 17, 1, 12, 3, 5, 10, 5, 11, 16)
+#Sampled 15, 10, 15, 17, 12, 10 by proportional allocation from Top 6 Strata#
+
+attach(hd)
+
+Case_Cohort_hd_005=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .05, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_01=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .1, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_015=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .15, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_02=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .2, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_025=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .25, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_03=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .3, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_035=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .35, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_04=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .4, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_045=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .45, strata = Strata_hd, size_vec = size_hd)
+Case_Cohort_hd_05=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat,Extra,Clinic), time = time, status = status, tau = .5, strata = Strata_hd, size_vec = size_hd)
+
+detach(hd)
+
+##################Case Sampling##################
+size_hd_CS=c(231, 26, 17, 13, 4, 24, 7, 6, 28, 1, 20, 3, 5, 14, 5, 11, 16)
+#Subcohort Size = 200#
+
+attach(hd)
+
+Full_Cohort_hd_005_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .05)
+Full_Cohort_hd_01_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .1)
+Full_Cohort_hd_015_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .15)
+Full_Cohort_hd_02_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .2)
+Full_Cohort_hd_025_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .25)
+Full_Cohort_hd_03_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .3)
+Full_Cohort_hd_035_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .35)
+Full_Cohort_hd_04_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .4)
+Full_Cohort_hd_045_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .45)
+Full_Cohort_hd_05_CS=NewtonRhapson(COVAR = cbind(age,Sex,Treat), Obs = time, Eps = status, Tau = .5)
+
+
+Case_Cohort_hd_005_CS=Case_Cohort(rep = 50, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .05, strata = Strata_hd, size_vec = size_hd_CS, one = TRUE)
+Case_Cohort_hd_01_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .1, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_015_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .15, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_02_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .2, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_025_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .25, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_03_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .3, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_035_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .35, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_04_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .4, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_045_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .45, strata = Strata_hd, size_vec = size_hd_CS)
+Case_Cohort_hd_05_CS=Case_Cohort(rep = 100, covariate = cbind(age,Sex,Treat), time = time, status = status, tau = .5, strata = Strata_hd, size_vec = size_hd_CS)
 
 detach(hd)
